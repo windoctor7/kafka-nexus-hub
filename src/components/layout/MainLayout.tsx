@@ -1,11 +1,27 @@
-import { ReactNode } from "react";
+import { ReactNode, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { Sidebar } from "./Sidebar";
+import { useIntegrator } from "@/contexts/IntegratorContext";
 
 interface MainLayoutProps {
   children: ReactNode;
 }
 
 export function MainLayout({ children }: MainLayoutProps) {
+  const navigate = useNavigate();
+  const { selectedIntegrator } = useIntegrator();
+
+  // Redirect to integrator selection if none selected
+  useEffect(() => {
+    if (!selectedIntegrator) {
+      navigate('/');
+    }
+  }, [selectedIntegrator, navigate]);
+
+  if (!selectedIntegrator) {
+    return null;
+  }
+
   return (
     <div className="min-h-screen bg-background cyber-grid">
       <Sidebar />

@@ -9,11 +9,13 @@ import { motion } from "framer-motion";
 import { useWebSocket } from "@/hooks/useWebSocket";
 import { useEffect } from "react";
 import { toast } from "sonner";
-
-// Configure your backend WebSocket URL here
-const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:8080/ws";
+import { useIntegrator } from "@/contexts/IntegratorContext";
 
 const Dashboard = () => {
+  const { selectedIntegrator } = useIntegrator();
+  
+  // Use integrator's WebSocket URL or fallback
+  const WS_URL = selectedIntegrator?.wsUrl || import.meta.env.VITE_WS_URL || "ws://localhost:8080/ws";
   const sourceStatus = sourceClusters.some((c) => c.status === "online") ? "online" : "offline";
 
   const { status, lastMessage, reconnectAttempts, connect, disconnect } = useWebSocket({
@@ -54,7 +56,7 @@ const Dashboard = () => {
               <span className="text-primary text-glow-cyan">Dashboard</span> de Monitoreo
             </h1>
             <p className="text-muted-foreground mt-1">
-              Estado en tiempo real del integrador de transacciones Kafka
+              {selectedIntegrator?.name || 'Integrador de transacciones Kafka'}
             </p>
           </div>
           <div className="flex items-center gap-4">
