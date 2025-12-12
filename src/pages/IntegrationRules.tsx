@@ -1,18 +1,21 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { motion } from "framer-motion";
-import { sourceFields, destinationFields, integrationRules } from "@/data/mockData";
-import { Code2, Eye, Workflow, Save } from "lucide-react";
+import { sourceFields as mockSourceFields, destinationFields, integrationRules } from "@/data/mockData";
+import { Code2, Eye, Workflow, Save, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import Editor from "@monaco-editor/react";
 import { FlowMapper } from "@/components/integration/FlowMapper";
+import { AsyncApiUploader } from "@/components/integration/AsyncApiUploader";
+import { ParsedAsyncApi } from "@/utils/asyncApiParser";
 import { toast } from "sonner";
 
 type ViewMode = "visual" | "flow" | "code";
 
 const IntegrationRules = () => {
   const [viewMode, setViewMode] = useState<ViewMode>("flow");
+  const [showUploader, setShowUploader] = useState(false);
+  const [loadedApis, setLoadedApis] = useState<ParsedAsyncApi[]>([]);
   const [mappings, setMappings] = useState(
     integrationRules.map((r) => ({
       source: r.source,
@@ -20,6 +23,20 @@ const IntegrationRules = () => {
       target: r.target,
     }))
   );
+
+  // Combine mock fields with fields from loaded AsyncAPIs
+  const sourceFields = useMemo(() => {
+    if (loadedApis.length === 0) return mockSourceFields;
+    
+    return loadedApis.flatMap(api => 
+      api.fields.map(field => ({
+        id: field.id,
+        topic: field.topic,
+        path: field.path,
+        type: field.type,
+      }))
+    );
+  }, [loadedApis]);
 
   const rulesJson = JSON.stringify(
     mappings.map((m) => ({
@@ -76,6 +93,20 @@ const IntegrationRules = () => {
             </p>
           </div>
           <div className="flex items-center gap-3">
+            <Button
+              variant={showUploader ? "default" : "outline"}
+              size="sm"
+              onClick={() => setShowUploader(!showUploader)}
+              className="gap-2"
+            >
+              <Upload className="w-4 h-4" />
+              AsyncAPI
+              {loadedApis.length > 0 && (
+                <span className="ml-1 px-1.5 py-0.5 text-xs rounded-full bg-primary-foreground/20">
+                  {loadedApis.length}
+                </span>
+              )}
+            </Button>
             <div className="flex items-center gap-1 p-1 rounded-lg bg-muted/50">
               <Button
                 variant={viewMode === "flow" ? "default" : "ghost"}
@@ -112,12 +143,30 @@ const IntegrationRules = () => {
           </div>
         </motion.div>
 
+        {/* AsyncAPI Uploader Panel */}
+        {showUploader && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            className="glass-card p-6"
+          >
+            <h3 className="text-lg font-semibold text-foreground mb-4">
+              Cargar AsyncAPI Specs (Origen)
+            </h3>
+            <AsyncApiUploader
+              loadedApis={loadedApis}
+              onApisChange={setLoadedApis}
+            />
+          </motion.div>
+        )}
+
         {/* Flow Mode - React Flow */}
         {viewMode === "flow" && (
           <FlowMapper
             sourceFields={sourceFields}
             destinationFields={destinationFields}
-            initialMappings={mappings}
+            initialMappings={loadedApis.length > 0 ? [] : mappings}
             onMappingsChange={handleMappingsChange}
           />
         )}
