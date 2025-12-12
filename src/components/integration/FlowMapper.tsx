@@ -40,21 +40,36 @@ interface FlowMapperProps {
   onMappingsChange?: (mappings: { source: string; field: string; target: string }[]) => void;
 }
 
-// Custom Source Node
-const SourceNode = ({ data }: { data: { label: string; type: string; topic: string } }) => (
-  <div className="px-4 py-3 rounded-lg border border-primary/50 bg-background/90 backdrop-blur-sm min-w-[200px] shadow-lg shadow-primary/10">
+// Custom Source Node with topic color
+const SourceNode = ({ data }: { data: { label: string; type: string; topic: string; topicColor?: string } }) => (
+  <div 
+    className="px-4 py-3 rounded-lg border bg-background/90 backdrop-blur-sm min-w-[220px] shadow-lg"
+    style={{ 
+      borderColor: data.topicColor || 'hsl(var(--primary))',
+      boxShadow: `0 4px 20px ${data.topicColor || 'hsl(var(--primary))'}20`
+    }}
+  >
     <Handle 
       type="source" 
       position={Position.Right} 
-      className="!w-3 !h-3 !bg-primary !border-2 !border-primary-foreground"
+      className="!w-3 !h-3 !border-2 !border-primary-foreground"
+      style={{ backgroundColor: data.topicColor || 'hsl(var(--primary))' }}
     />
     <div className="flex items-center gap-2 mb-1">
-      <Database className="w-4 h-4 text-primary" />
-      <span className="text-xs text-muted-foreground">{data.topic}</span>
+      <Database className="w-4 h-4" style={{ color: data.topicColor || 'hsl(var(--primary))' }} />
+      <span 
+        className="text-xs font-medium px-2 py-0.5 rounded"
+        style={{ 
+          backgroundColor: `${data.topicColor || 'hsl(var(--primary))'}20`,
+          color: data.topicColor || 'hsl(var(--primary))'
+        }}
+      >
+        {data.topic}
+      </span>
     </div>
     <code className="text-sm font-mono text-foreground">{data.label}</code>
     <div className="mt-1">
-      <span className="text-xs px-2 py-0.5 rounded bg-primary/20 text-primary">{data.type}</span>
+      <span className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">{data.type}</span>
     </div>
   </div>
 );
@@ -97,20 +112,47 @@ export const FlowMapper = ({
 }: FlowMapperProps) => {
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
 
-  // Create initial nodes
+  // Create initial nodes grouped by topic
   const initialNodes: Node[] = useMemo(() => {
-    const sources: Node[] = sourceFields.map((field, index) => ({
-      id: `source-${field.id}`,
-      type: 'source',
-      position: { x: 50, y: 50 + index * 100 },
-      data: { label: field.path, type: field.type, topic: field.topic },
-      draggable: true,
-    }));
+    // Group source fields by topic
+    const groupedByTopic = sourceFields.reduce((acc, field) => {
+      if (!acc[field.topic]) acc[field.topic] = [];
+      acc[field.topic].push(field);
+      return acc;
+    }, {} as Record<string, typeof sourceFields>);
+
+    const topics = Object.keys(groupedByTopic);
+    const sources: Node[] = [];
+    let yOffset = 50;
+
+    topics.forEach((topic, topicIndex) => {
+      const fields = groupedByTopic[topic];
+      const topicColor = `hsl(${(topicIndex * 60) % 360}, 70%, 50%)`;
+      
+      fields.forEach((field, fieldIndex) => {
+        sources.push({
+          id: `source-${field.id}`,
+          type: 'source',
+          position: { x: 50, y: yOffset },
+          data: { 
+            label: field.path, 
+            type: field.type, 
+            topic: field.topic,
+            topicColor,
+          },
+          draggable: true,
+        });
+        yOffset += 85;
+      });
+      
+      // Add spacing between topic groups
+      yOffset += 30;
+    });
 
     const destinations: Node[] = destinationFields.map((field, index) => ({
       id: `dest-${field.id}`,
       type: 'destination',
-      position: { x: 450, y: 50 + index * 100 },
+      position: { x: 500, y: 50 + index * 85 },
       data: { label: field.path, type: field.type, required: field.required },
       draggable: true,
     }));
