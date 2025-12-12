@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { NavLink, useLocation } from "react-router-dom";
+import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import {
   LayoutDashboard,
@@ -10,11 +10,13 @@ import {
   ChevronLeft,
   ChevronRight,
   Zap,
+  LogOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useIntegrator } from "@/contexts/IntegratorContext";
 
 const navItems = [
-  { icon: LayoutDashboard, label: "Dashboard", path: "/" },
+  { icon: LayoutDashboard, label: "Dashboard", path: "/dashboard" },
   { icon: Server, label: "Clusters", path: "/clusters" },
   { icon: GitBranch, label: "Reglas de Integración", path: "/rules" },
   { icon: Search, label: "Trazabilidad", path: "/traceability" },
@@ -24,6 +26,19 @@ const navItems = [
 export function Sidebar() {
   const [collapsed, setCollapsed] = useState(false);
   const location = useLocation();
+  const navigate = useNavigate();
+  const { selectedIntegrator, setSelectedIntegrator } = useIntegrator();
+
+  const handleChangeIntegrator = () => {
+    setSelectedIntegrator(null);
+    navigate('/');
+  };
+
+  const statusColor = selectedIntegrator?.status === 'online' 
+    ? 'bg-green-500' 
+    : selectedIntegrator?.status === 'warning' 
+    ? 'bg-yellow-500' 
+    : 'bg-red-500';
 
   return (
     <motion.aside
@@ -51,6 +66,33 @@ export function Sidebar() {
           )}
         </div>
       </div>
+
+      {/* Selected Integrator Info */}
+      {selectedIntegrator && (
+        <div className="px-3 py-3 border-b border-sidebar-border">
+          {collapsed ? (
+            <div className="flex justify-center">
+              <div className={`w-3 h-3 rounded-full ${statusColor}`} />
+            </div>
+          ) : (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="flex items-center gap-2 px-2 py-2 rounded-lg bg-muted/50"
+            >
+              <div className={`w-2 h-2 rounded-full ${statusColor}`} />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-medium text-foreground truncate">
+                  {selectedIntegrator.name}
+                </p>
+                <p className="text-[10px] text-muted-foreground truncate">
+                  {selectedIntegrator.wsUrl}
+                </p>
+              </div>
+            </motion.div>
+          )}
+        </div>
+      )}
 
       {/* Navigation */}
       <nav className="flex-1 py-6 px-3 space-y-2 overflow-y-auto scrollbar-cyber">
@@ -97,8 +139,15 @@ export function Sidebar() {
         })}
       </nav>
 
-      {/* Collapse Button */}
+      {/* Change Integrator Button */}
       <div className="p-3 border-t border-sidebar-border">
+        <button
+          onClick={handleChangeIntegrator}
+          className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors mb-2"
+        >
+          <LogOut className="w-5 h-5" />
+          {!collapsed && <span className="text-sm">Cambiar Integrador</span>}
+        </button>
         <button
           onClick={() => setCollapsed(!collapsed)}
           className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
