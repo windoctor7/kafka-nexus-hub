@@ -1,10 +1,10 @@
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Server, Activity, AlertTriangle, XCircle, Plus, Settings, ArrowRight } from 'lucide-react';
+import { Server, Activity, AlertTriangle, XCircle, Plus, ArrowRight } from 'lucide-react';
 import { useIntegrator, Integrator } from '@/contexts/IntegratorContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-
+import AddIntegratorDialog from '@/components/integrator/AddIntegratorDialog';
 const statusConfig = {
   online: {
     color: 'text-green-400',
@@ -116,10 +116,7 @@ const IntegratorSelect = () => {
                 <p className="text-xs text-muted-foreground">Portal de Configuración y Monitoreo</p>
               </div>
             </div>
-            <Button variant="outline" size="sm" className="gap-2">
-              <Plus className="w-4 h-4" />
-              Agregar Integrador
-            </Button>
+            <AddIntegratorDialog />
           </div>
         </div>
       </header>
@@ -195,10 +192,7 @@ const IntegratorSelect = () => {
             <p className="text-muted-foreground mb-4">
               Agrega tu primer integrador para comenzar el monitoreo
             </p>
-            <Button className="gap-2">
-              <Plus className="w-4 h-4" />
-              Agregar Integrador
-            </Button>
+            <AddIntegratorDialog />
           </motion.div>
         )}
       </main>
