@@ -2,12 +2,43 @@ import { MainLayout } from "@/components/layout/MainLayout";
 import { HealthCard } from "@/components/dashboard/HealthCard";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { MetricsChart } from "@/components/dashboard/MetricsChart";
+import { WebSocketStatus } from "@/components/dashboard/WebSocketStatus";
 import { sourceClusters, destinationCluster, dashboardStats } from "@/data/mockData";
 import { Server, Send, CheckCircle2, AlertTriangle, Clock, Activity } from "lucide-react";
 import { motion } from "framer-motion";
+import { useWebSocket } from "@/hooks/useWebSocket";
+import { useEffect } from "react";
+import { toast } from "sonner";
+
+// Configure your backend WebSocket URL here
+const WS_URL = import.meta.env.VITE_WS_URL || "ws://localhost:8080/ws";
 
 const Dashboard = () => {
   const sourceStatus = sourceClusters.some((c) => c.status === "online") ? "online" : "offline";
+
+  const { status, lastMessage, reconnectAttempts, connect, disconnect } = useWebSocket({
+    url: WS_URL,
+    onMessage: (message) => {
+      console.log("WebSocket message received:", message);
+      // Handle real-time updates here
+      if (message.type === "metric_update") {
+        toast.info("Métricas actualizadas");
+      } else if (message.type === "alert") {
+        toast.warning("Nueva alerta recibida");
+      }
+    },
+    onConnect: () => {
+      toast.success("Conectado al servidor");
+    },
+    onDisconnect: () => {
+      toast.info("Desconectado del servidor");
+    },
+  });
+
+  // Auto-connect on mount (optional - remove if you want manual connection only)
+  useEffect(() => {
+    // Uncomment to auto-connect: connect();
+  }, []);
 
   return (
     <MainLayout>
@@ -16,7 +47,7 @@ const Dashboard = () => {
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="flex items-center justify-between"
+          className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between"
         >
           <div>
             <h1 className="text-3xl font-bold text-foreground">
@@ -26,9 +57,17 @@ const Dashboard = () => {
               Estado en tiempo real del integrador de transacciones Kafka
             </p>
           </div>
-          <div className="flex items-center gap-2 px-4 py-2 glass-card">
-            <div className="status-indicator online" />
-            <span className="text-sm text-foreground">Sistema Operativo</span>
+          <div className="flex items-center gap-4">
+            <WebSocketStatus
+              status={status}
+              reconnectAttempts={reconnectAttempts}
+              onConnect={connect}
+              onDisconnect={disconnect}
+            />
+            <div className="flex items-center gap-2 px-4 py-2 glass-card">
+              <div className="status-indicator online" />
+              <span className="text-sm text-foreground">Sistema Operativo</span>
+            </div>
           </div>
         </motion.div>
 
