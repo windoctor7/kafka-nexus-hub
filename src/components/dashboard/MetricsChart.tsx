@@ -10,9 +10,12 @@ import {
   Area,
   AreaChart,
 } from "recharts";
-import { metricsData } from "@/data/mockData";
 
-export function MetricsChart() {
+interface MetricsChartProps {
+  data?: any[];
+}
+
+export function MetricsChart({ data = [] }: MetricsChartProps) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -39,7 +42,7 @@ export function MetricsChart() {
 
       <div className="h-[300px]">
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={metricsData}>
+          <AreaChart data={data}>
             <defs>
               <linearGradient id="colorMessages" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="hsl(186, 100%, 50%)" stopOpacity={0.3} />

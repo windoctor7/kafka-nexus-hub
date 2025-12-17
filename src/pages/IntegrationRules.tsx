@@ -1,7 +1,8 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { motion } from "framer-motion";
-import { sourceFields as mockSourceFields, destinationFields, integrationRules } from "@/data/mockData";
+import { sourceFields as mockSourceFields, destinationFields } from "@/data/mockData";
+import { fetchConfig, updateConfig, IntegrationConfig } from "@/lib/api";
 import { Code2, Eye, Workflow, Save, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Editor from "@monaco-editor/react";
@@ -16,19 +17,51 @@ const IntegrationRules = () => {
   const [viewMode, setViewMode] = useState<ViewMode>("flow");
   const [showUploader, setShowUploader] = useState(false);
   const [loadedApis, setLoadedApis] = useState<ParsedAsyncApi[]>([]);
-  const [mappings, setMappings] = useState(
-    integrationRules.map((r) => ({
-      source: r.source,
-      field: r.field,
-      target: r.target,
-    }))
-  );
+  const [config, setConfig] = useState<IntegrationConfig | null>(null);
+  const [mappings, setMappings] = useState<{ source: string; field: string; target: string }[]>([]);
+
+  useEffect(() => {
+    loadConfig();
+  }, []);
+
+  const loadConfig = async () => {
+    try {
+      const data = await fetchConfig();
+      setConfig(data);
+      if (data.integration_rules && data.integration_rules.fields) {
+        const flatMappings: { source: string; field: string; target: string }[] = [];
+
+        // Recursive function to flatten rules
+        const traverseFields = (fields: any[], parentPath: string) => {
+          fields.forEach(f => {
+            const currentPath = parentPath ? `${parentPath}.${f.name}` : f.name;
+            if (f.source && f.field) {
+              flatMappings.push({
+                source: f.source,
+                field: f.field,
+                target: currentPath
+              });
+            }
+            if (f.fields) {
+              traverseFields(f.fields, currentPath);
+            }
+          });
+        };
+
+        traverseFields(data.integration_rules.fields, "transaction"); // Assuming root is transaction
+        setMappings(flatMappings);
+      }
+    } catch (error) {
+      console.error("Failed to load config", error);
+      toast.error("Failed to load configuration");
+    }
+  };
 
   // Combine mock fields with fields from loaded AsyncAPIs
   const sourceFields = useMemo(() => {
     if (loadedApis.length === 0) return mockSourceFields;
-    
-    return loadedApis.flatMap(api => 
+
+    return loadedApis.flatMap(api =>
       api.fields.map(field => ({
         id: field.id,
         topic: field.topic,
@@ -42,7 +75,7 @@ const IntegrationRules = () => {
     mappings.map((m) => ({
       source: m.source,
       field: m.field,
-      name: m.target.split(".").pop(),
+      target: m.target,
     })),
     null,
     2
@@ -52,24 +85,49 @@ const IntegrationRules = () => {
     setMappings(newMappings);
   }, []);
 
-  const handleSave = () => {
-    // Here you would send to your backend via WebSocket or REST
-    toast.success("Reglas guardadas exitosamente", {
-      description: `${mappings.length} mapeos configurados`,
-    });
-    console.log("Mappings to save:", mappings);
+  const handleSave = async () => {
+    if (!config) return;
+
+    try {
+      // Transform flat mappings back to nested structure
+      // This is a simplified reconstruction. 
+      // In a real scenario, we need to merge with existing structure or build a full tree.
+      // For this demo, we will reconstruct the 'operation' object structure as seen in config.json
+
+      const newRules = {
+        lang: "es",
+        fields: [
+          {
+            name: "operation",
+            type: "object",
+            fields: mappings.map(m => ({
+              source: m.source,
+              name: m.target.split('.').pop() || "unknown", // Simple extraction
+              field: m.field
+            }))
+          }
+        ]
+      };
+
+      const newConfig = { ...config, integration_rules: newRules };
+      await updateConfig(newConfig);
+
+      toast.success("Reglas guardadas exitosamente", {
+        description: `${mappings.length} mapeos configurados`,
+      });
+      loadConfig();
+    } catch (error) {
+      console.error("Failed to save rules", error);
+      toast.error("Error al guardar las reglas");
+    }
   };
 
   const handleCodeChange = (value: string | undefined) => {
     if (!value) return;
     try {
       const parsed = JSON.parse(value);
-      const newMappings = parsed.map((rule: { source: string; field: string; name: string }) => ({
-        source: rule.source,
-        field: rule.field,
-        target: `transaction.${rule.name}`,
-      }));
-      setMappings(newMappings);
+      // Validate structure if needed
+      setMappings(parsed);
     } catch {
       // Invalid JSON, ignore
     }
@@ -89,7 +147,7 @@ const IntegrationRules = () => {
               <span className="text-primary text-glow-cyan">Reglas</span> de Integración
             </h1>
             <p className="text-muted-foreground mt-1">
-              Mapea campos de origen al mensaje destino unificado
+              Mapea campos de origen al mensaje destino unificado (Sidecar Connected)
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -166,7 +224,7 @@ const IntegrationRules = () => {
           <FlowMapper
             sourceFields={sourceFields}
             destinationFields={destinationFields}
-            initialMappings={loadedApis.length > 0 ? [] : mappings}
+            initialMappings={mappings}
             onMappingsChange={handleMappingsChange}
           />
         )}

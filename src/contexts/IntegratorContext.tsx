@@ -26,7 +26,7 @@ const defaultIntegrators: Integrator[] = [
     name: 'Payments Integrator',
     description: 'Procesa transacciones de pagos desde múltiples fuentes',
     status: 'online',
-    wsUrl: 'ws://localhost:8080/ws',
+    wsUrl: 'ws://localhost:3001/logs',
     lastActivity: '2024-01-15T10:30:00Z',
   },
   {

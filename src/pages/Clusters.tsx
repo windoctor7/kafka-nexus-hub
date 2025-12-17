@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { motion, AnimatePresence } from "framer-motion";
-import { sourceClusters } from "@/data/mockData";
+import { fetchConfig, updateConfig, ClusterConfig, IntegrationConfig } from "@/lib/api";
 import {
   Server,
   Plus,
@@ -17,6 +17,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { toast } from "sonner";
 
 type AuthType = "PEM" | "JKS" | "KERBEROS" | "NONE";
 
@@ -35,9 +36,10 @@ const authTypes: { type: AuthType; label: string; icon: React.ElementType }[] = 
 ];
 
 const Clusters = () => {
-  const [clusters, setClusters] = useState(sourceClusters);
+  const [config, setConfig] = useState<IntegrationConfig | null>(null);
+  const [clusters, setClusters] = useState<any[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingCluster, setEditingCluster] = useState<string | null>(null);
+  const [editingClusterIndex, setEditingClusterIndex] = useState<number | null>(null);
   const [form, setForm] = useState<ClusterForm>({
     name: "",
     bootstrapServers: "",
@@ -46,28 +48,69 @@ const Clusters = () => {
   });
   const [topicInput, setTopicInput] = useState("");
 
+  useEffect(() => {
+    loadConfig();
+  }, []);
+
+  const loadConfig = async () => {
+    try {
+      const data = await fetchConfig();
+      setConfig(data);
+
+      // Transform config to UI model
+      const uiClusters = data.source_clusters.map((c, i) => ({
+        id: `source-${i}`,
+        name: `Source Cluster ${i + 1}`,
+        bootstrapServers: c.bootstrap_servers,
+        topics: c.topics.map(t => t.topic),
+        authType: c.authType,
+        status: "online", // Mock status for now
+        messagesPerMinute: 0 // Mock metric
+      }));
+
+      // Add destination cluster
+      if (data.destination_cluster) {
+        uiClusters.push({
+          id: "dest",
+          name: "Destination Cluster",
+          bootstrapServers: data.destination_cluster.bootstrap_servers,
+          topics: [data.destination_cluster.topic],
+          authType: data.destination_cluster.authType,
+          status: "online",
+          messagesPerMinute: 0
+        });
+      }
+
+      setClusters(uiClusters);
+    } catch (error) {
+      console.error("Failed to load config", error);
+      toast.error("Failed to load configuration");
+    }
+  };
+
   const openModal = (clusterId?: string) => {
     if (clusterId) {
-      const cluster = clusters.find((c) => c.id === clusterId);
+      const index = clusters.findIndex((c) => c.id === clusterId);
+      const cluster = clusters[index];
       if (cluster) {
         setForm({
           name: cluster.name,
           bootstrapServers: cluster.bootstrapServers,
           topics: cluster.topics,
-          authType: cluster.authType,
+          authType: cluster.authType as AuthType,
         });
-        setEditingCluster(clusterId);
+        setEditingClusterIndex(index);
       }
     } else {
       setForm({ name: "", bootstrapServers: "", topics: [], authType: "NONE" });
-      setEditingCluster(null);
+      setEditingClusterIndex(null);
     }
     setIsModalOpen(true);
   };
 
   const closeModal = () => {
     setIsModalOpen(false);
-    setEditingCluster(null);
+    setEditingClusterIndex(null);
     setTopicInput("");
   };
 
@@ -80,6 +123,30 @@ const Clusters = () => {
 
   const removeTopic = (topic: string) => {
     setForm({ ...form, topics: form.topics.filter((t) => t !== topic) });
+  };
+
+  const handleSave = async () => {
+    if (!config) return;
+
+    try {
+      const newConfig = { ...config };
+
+      // This is a simplified update logic. 
+      // In a real app, we'd need to map UI fields back to the exact JSON structure.
+      // For now, we'll just update the bootstrap servers if it's a source cluster.
+
+      if (editingClusterIndex !== null && editingClusterIndex < newConfig.source_clusters.length) {
+        newConfig.source_clusters[editingClusterIndex].bootstrap_servers = form.bootstrapServers;
+        // Note: Updating topics/auth would require more complex mapping
+      }
+
+      await updateConfig(newConfig);
+      toast.success("Configuration saved");
+      loadConfig();
+      closeModal();
+    } catch (error) {
+      toast.error("Failed to save configuration");
+    }
   };
 
   return (
@@ -96,7 +163,7 @@ const Clusters = () => {
               <span className="text-primary text-glow-cyan">Gestión</span> de Clusters
             </h1>
             <p className="text-muted-foreground mt-1">
-              Configura los clusters de Kafka de origen
+              Configura los clusters de Kafka de origen (desde Sidecar)
             </p>
           </div>
           <Button onClick={() => openModal()} variant="neon" className="gap-2">
@@ -154,7 +221,7 @@ const Clusters = () => {
                     </td>
                     <td className="p-4">
                       <div className="flex flex-wrap gap-1">
-                        {cluster.topics.map((topic) => (
+                        {cluster.topics.map((topic: string) => (
                           <span
                             key={topic}
                             className="text-xs px-2 py-1 rounded-full bg-primary/10 text-primary border border-primary/20"
@@ -223,7 +290,7 @@ const Clusters = () => {
             >
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-xl font-bold text-foreground">
-                  {editingCluster ? "Editar Cluster" : "Nuevo Cluster"}
+                  {editingClusterIndex !== null ? "Editar Cluster" : "Nuevo Cluster"}
                 </h2>
                 <Button variant="ghost" size="icon" onClick={closeModal}>
                   <X className="w-5 h-5" />
@@ -325,8 +392,8 @@ const Clusters = () => {
                   <Button variant="ghost" onClick={closeModal}>
                     Cancelar
                   </Button>
-                  <Button variant="default">
-                    {editingCluster ? "Guardar Cambios" : "Crear Cluster"}
+                  <Button variant="default" onClick={handleSave}>
+                    {editingClusterIndex !== null ? "Guardar Cambios" : "Crear Cluster"}
                   </Button>
                 </div>
               </div>
