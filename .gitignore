@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Local Database
+*.db
+*.db-shm
+*.db-wal
+integration-events.json

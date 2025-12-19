@@ -4,29 +4,55 @@ import { cn } from "@/lib/utils";
 
 interface HealthCardProps {
   title: string;
-  status: "online" | "offline";
+  status: "online" | "offline" | "warning";
   icon: LucideIcon;
   details?: string;
   delay?: number;
+  onClick?: () => void;
+  className?: string;
 }
 
-export function HealthCard({ title, status, icon: Icon, details, delay = 0 }: HealthCardProps) {
+export function HealthCard({ title, status, icon: Icon, details, delay = 0, onClick, className }: HealthCardProps) {
   const isOnline = status === "online";
+  const isWarning = status === "warning";
+
+  let statusColor = "text-destructive";
+  let statusBg = "bg-destructive/10";
+  let statusGlow = "text-glow-red";
+  let gradient = "from-destructive/20";
+  let statusText = "Offline";
+
+  if (isOnline) {
+    statusColor = "text-success";
+    statusBg = "bg-success/10";
+    statusGlow = "text-glow-green";
+    gradient = "from-success/20";
+    statusText = "Online";
+  } else if (isWarning) {
+    statusColor = "text-warning";
+    statusBg = "bg-warning/10";
+    statusGlow = "text-glow-yellow";
+    gradient = "from-warning/20";
+    statusText = "Degraded";
+  }
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay, duration: 0.5 }}
-      className="glass-card-hover p-6 relative overflow-hidden"
+      onClick={onClick}
+      className={cn(
+        "glass-card-hover p-6 relative overflow-hidden",
+        onClick && "cursor-pointer",
+        className
+      )}
     >
       {/* Glow effect based on status */}
       <div
         className={cn(
-          "absolute inset-0 opacity-20",
-          isOnline
-            ? "bg-gradient-to-br from-success/20 to-transparent"
-            : "bg-gradient-to-br from-destructive/20 to-transparent"
+          "absolute inset-0 opacity-20 bg-gradient-to-br to-transparent",
+          gradient
         )}
       />
 
@@ -35,25 +61,26 @@ export function HealthCard({ title, status, icon: Icon, details, delay = 0 }: He
           <div
             className={cn(
               "w-12 h-12 rounded-xl flex items-center justify-center",
-              isOnline ? "bg-success/10" : "bg-destructive/10"
+              statusBg
             )}
           >
             <Icon
               className={cn(
                 "w-6 h-6",
-                isOnline ? "text-success" : "text-destructive"
+                statusColor
               )}
             />
           </div>
           <div className="flex items-center gap-2">
-            <div className={cn("status-indicator", isOnline ? "online" : "offline")} />
+            <div className={cn("status-indicator", status)} />
             <span
               className={cn(
                 "text-sm font-semibold uppercase tracking-wide",
-                isOnline ? "text-success text-glow-green" : "text-destructive text-glow-red"
+                statusColor,
+                statusGlow
               )}
             >
-              {isOnline ? "Online" : "Offline"}
+              {statusText}
             </span>
           </div>
         </div>

@@ -11,7 +11,7 @@ import {
   AreaChart,
 } from "recharts";
 
-interface MetricsChartProps {
+export interface MetricsChartProps {
   data?: any[];
 }
 

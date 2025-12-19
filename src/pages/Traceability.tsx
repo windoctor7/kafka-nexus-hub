@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { useSearchParams } from "react-router-dom";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { motion } from "framer-motion";
 import { Search, CheckCircle2, XCircle, Clock, FileText, AlertCircle } from "lucide-react";
@@ -6,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { LogViewer } from "@/components/LogViewer";
-import { SIDECAR_WS } from "@/lib/api";
+import { SIDECAR_WS, SIDECAR_API } from "@/lib/api";
 
 type StepStatus = "completed" | "error" | "pending";
 
@@ -51,6 +52,9 @@ const Traceability = () => {
   const [allLogs, setAllLogs] = useState<any[]>([]);
   const wsRef = useRef<WebSocket | null>(null);
 
+  const [searchParams] = useSearchParams();
+  const initialSearchTriggered = useRef(false);
+
   useEffect(() => {
     const ws = new WebSocket(SIDECAR_WS);
     wsRef.current = ws;
@@ -68,6 +72,133 @@ const Traceability = () => {
       ws.close();
     };
   }, []);
+
+  // Auto-search from URL param
+  useEffect(() => {
+    const idFromUrl = searchParams.get("id");
+    if (idFromUrl && !initialSearchTriggered.current) {
+      setSearchId(idFromUrl);
+      initialSearchTriggered.current = true;
+
+      // Fetch logs from API instead of relying on WS history
+      fetch(`${SIDECAR_API}/logs/search?q=${idFromUrl}`)
+        .then(res => res.json())
+        .then(logs => {
+          if (logs.length > 0) {
+            let expectedTopics: string[] = [];
+            const receivedTopics: Set<string> = new Set();
+            const steps: TraceStep[] = [];
+
+            // First pass: Identify expected topics and build initial steps
+            logs.forEach((log: any) => {
+              let stepName = "Evento Procesado";
+              let status: StepStatus = "completed";
+              let details = log.message;
+              let topic = undefined;
+
+              if (log.message.includes("Plan dinámico registrado")) {
+                stepName = "Planificación de Integración";
+                // Extract expected topics from message
+                // Format seen: "{TP-TOPIC-1=1, TP-TOPIC-2=1}" (Java Map.toString())
+                try {
+                  // Try to extract content inside {}
+                  const mapContentMatch = log.message.match(/\{([^}]+)\}/);
+                  if (mapContentMatch) {
+                    const mapContent = mapContentMatch[1];
+                    // Split by comma and extract keys (Topic names)
+                    // Entry format: "TOPIC_NAME=1"
+                    expectedTopics = mapContent.split(",").map((entry: string) => {
+                      const parts = entry.trim().split("=");
+                      return parts[0].trim();
+                    });
+                  } else {
+                    // Fallback: try JSON if it was JSON
+                    const jsonPart = log.message.substring(log.message.indexOf("{"));
+                    const plan = JSON.parse(jsonPart);
+                    if (plan.topicosIntegrados) {
+                      expectedTopics = plan.topicosIntegrados.map((t: any) => t.nombre);
+                    }
+                  }
+                } catch (e) {
+                  console.warn("Failed to parse plan:", e);
+                  // Fallback regex if simple string [Topic1, Topic2]
+                  const match = log.message.match(/\[(.*?)\]/);
+                  if (match) {
+                    expectedTopics = match[1].split(",").map(t => t.trim());
+                  }
+                }
+              } else if (log.message.includes("Evento recibido del tópico")) {
+                // Just track received topics, don't show step
+                const match = log.message.match(/tópico\s+([A-Za-z0-9._-]+)/);
+                if (match) {
+                  receivedTopics.add(match[1]);
+                }
+                return; // Skip adding step
+              } else if (log.message.includes("READY")) {
+                stepName = "Validación Completa";
+              } else if (log.message.includes("Integrated correlation")) {
+                stepName = "Integración Exitosa";
+              } else if (log.level === "ERROR") {
+                stepName = "Error en Procesamiento";
+                status = "error";
+              }
+
+              steps.push({
+                step: stepName,
+                status: status,
+                timestamp: log["@timestamp"],
+                details: details,
+                topic: topic
+              });
+            });
+
+            // Calculate missing topics
+            const missingTopics = expectedTopics.filter(t => !receivedTopics.has(t));
+
+            // Check if we have an error step
+            const errorStepIndex = steps.findIndex(s => s.status === "error");
+            let errorTimestamp = null;
+
+            if (errorStepIndex !== -1) {
+              errorTimestamp = steps[errorStepIndex].timestamp;
+              // If we have missing topics, remove the generic error step to replace it
+              if (missingTopics.length > 0) {
+                steps.splice(errorStepIndex, 1);
+              }
+            }
+
+            if (missingTopics.length > 0) {
+              steps.push({
+                step: "Eventos Faltantes",
+                status: "error",
+                timestamp: errorTimestamp, // Use timeout timestamp if available
+                details: missingTopics.map(t => `• ${t}`).join('\n'),
+                topic: undefined
+              });
+            }
+
+            // Sort steps: existing ones by timestamp, missing ones at the end
+            steps.sort((a, b) => {
+              if (!a.timestamp) return 1;
+              if (!b.timestamp) return -1;
+              return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
+            });
+
+            setCurrentTrace({
+              transactionId: idFromUrl,
+              steps: steps
+            });
+            setNotFound(false);
+          } else {
+            setNotFound(true);
+          }
+        })
+        .catch(err => {
+          console.error("Error searching logs:", err);
+          setNotFound(true);
+        });
+    }
+  }, [searchParams]);
 
   const handleSearch = () => {
     // Filter logs that contain the searchId
@@ -259,7 +390,7 @@ const Traceability = () => {
                               {formatTimestamp(step.timestamp)}
                             </span>
                           </div>
-                          <p className="text-sm text-muted-foreground">{step.details}</p>
+                          <p className="text-sm text-muted-foreground whitespace-pre-wrap">{step.details}</p>
                         </div>
                       </div>
                     </motion.div>

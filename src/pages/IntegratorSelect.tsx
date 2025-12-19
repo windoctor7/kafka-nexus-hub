@@ -32,11 +32,11 @@ const statusConfig = {
   },
 };
 
-const IntegratorCard = ({ 
-  integrator, 
-  onSelect 
-}: { 
-  integrator: Integrator; 
+const IntegratorCard = ({
+  integrator,
+  onSelect
+}: {
+  integrator: Integrator;
   onSelect: () => void;
 }) => {
   const status = statusConfig[integrator.status];
@@ -49,9 +49,10 @@ const IntegratorCard = ({
       whileHover={{ scale: 1.02, y: -4 }}
       transition={{ duration: 0.2 }}
     >
-      <Card 
+      <Card
         className={`cursor-pointer border-2 ${status.borderColor} bg-card/50 backdrop-blur-sm hover:bg-card/80 transition-all duration-300 shadow-lg ${status.glowColor}`}
         onClick={onSelect}
+        data-testid="integrator-card"
       >
         <CardHeader className="pb-3">
           <div className="flex items-start justify-between">

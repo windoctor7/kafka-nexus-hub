@@ -49,9 +49,15 @@ export function StatCard({
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay, duration: 0.5 }}
-      className="glass-card-hover p-6"
+      className="glass-card-hover p-6 relative overflow-hidden"
+      data-testid={`stat-card-${title}`}
     >
-      <div className="flex items-start justify-between mb-4">
+      {/* Watermark Icon */}
+      <div className="absolute -top-4 -right-4 opacity-[0.03] pointer-events-none">
+        <Icon className="w-32 h-32" />
+      </div>
+
+      <div className="flex items-start justify-between mb-4 relative z-10">
         <div className={cn("w-12 h-12 rounded-xl flex items-center justify-center", styles.iconBg)}>
           <Icon className={cn("w-6 h-6", styles.iconColor)} />
         </div>
@@ -68,9 +74,12 @@ export function StatCard({
         )}
       </div>
 
-      <div className="space-y-1">
+      <div className="space-y-1 relative z-10">
         <h3 className="text-sm text-muted-foreground">{title}</h3>
-        <p className={cn("text-3xl font-bold text-foreground", styles.valueShadow)}>
+        <p
+          className={cn("text-3xl font-bold text-foreground", styles.valueShadow)}
+          data-testid="stat-value"
+        >
           {typeof value === "number" ? value.toLocaleString() : value}
         </p>
       </div>
