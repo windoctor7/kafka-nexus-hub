@@ -48,7 +48,7 @@ describe('Dashboard E2E (Real Data)', () => {
         // Backend window is 20s, so we need > 20s to catch expired transactions
         cy.get('body', { timeout: 30000 }).should(($body) => {
             const successText = $body.find('[data-testid="stat-card-Transacciones Exitosas"] [data-testid="stat-value"]').text();
-            const errorText = $body.find('[data-testid="stat-card-Errores de Validación"] [data-testid="stat-value"]').text();
+            const errorText = $body.find('[data-testid="stat-card-Transacciones Incompletas"] [data-testid="stat-value"]').text();
 
             const successCount = parseInt(successText.replace(/,/g, '') || '0');
             const errorCount = parseInt(errorText.replace(/,/g, '') || '0');
@@ -68,7 +68,7 @@ describe('Dashboard E2E (Real Data)', () => {
         // Verify Activity Feed if errors exist
         // Note: Count validation is done in the previous test
 
-        cy.get('[data-testid="stat-card-Errores de Validación"] [data-testid="stat-value"]').should(($div) => {
+        cy.get('[data-testid="stat-card-Transacciones Incompletas"] [data-testid="stat-value"]').should(($div) => {
             const count = parseInt($div.text().replace(/,/g, ''));
             // Just ensure it's a number
             expect(count).to.be.gte(0);
@@ -77,7 +77,7 @@ describe('Dashboard E2E (Real Data)', () => {
         // Verify Activity Feed (Errores Recientes)
         // Only check if errors exist
         cy.get('body').then(($body) => {
-            if ($body.find('[data-testid="stat-card-Errores de Validación"] [data-testid="stat-value"]').text() !== '0') {
+            if ($body.find('[data-testid="stat-card-Transacciones Incompletas"] [data-testid="stat-value"]').text() !== '0') {
                 cy.contains('Errores Recientes').should('be.visible');
                 // Click the first error to verify navigation
                 cy.contains('Transacción Expirada').should('be.visible').first().click();

@@ -34,6 +34,28 @@ El proyecto es una **Single Page Application (SPA)** construida con **React 18**
 - **[Context API](https://react.dev/reference/react/createContext)**: Client State (Global UI state).
 - **[React Router](https://reactrouter.com/)**: Navegación client-side.
 
+### Backend & Persistencia (Sidecar)
+- **Node.js + Express**: Servidor ligero para procesar logs.
+- **SQLite + FTS5**: Base de datos embebida con búsqueda de texto completo y modo WAL para alto rendimiento.
+- **WebSocket (ws)**: Transmisión de eventos en tiempo real al frontend.
+
+### Testing
+- **Cypress**: Pruebas End-to-End (E2E).
+- **K6**: Pruebas de Carga y Estrés.
+
+## ⚙️ Arquitectura Backend (Sidecar Pattern)
+
+El sistema utiliza un patrón **Sidecar** para monitorear la aplicación Java sin modificar su código.
+
+1.  **Ingesta de Logs:** El servidor Node.js lee el archivo `integration-events.json` generado por la aplicación Java.
+2.  **Procesamiento y Persistencia:**
+    - Los logs se parsean y normalizan.
+    - Se almacenan en **SQLite** usando una tabla virtual **FTS5** para búsquedas ultra-rápidas.
+    - Se calculan métricas complejas (P95 Latency, Agregaciones de 5 min) usando SQL nativo.
+3.  **Distribución:**
+    - **WebSocket:** Envía actualizaciones en tiempo real (con throttling de 1s) al Dashboard.
+    - **REST API:** Sirve datos históricos y resultados de búsqueda para la trazabilidad.
+
 ## 📂 Estructura de Directorios (`/src`)
 
 La estructura organiza el código por **Funcionalidad** (Features) más que por tipo de archivo:

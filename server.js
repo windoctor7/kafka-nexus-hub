@@ -504,10 +504,67 @@ app.post('/api/test/trigger', async (req, res) => {
 // On-demand Health Check
 app.get('/api/health/check', async (req, res) => {
   try {
-    await checkClusterHealth(); // Force immediate check
-    // Convert Map to Object for JSON response
-    const healthStatus = Object.fromEntries(dashboardStats.clusterHealth);
-    res.json(healthStatus);
+    // Get fresh counts from DB to ensure consistency with Dashboard
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+    const startOfDayStr = startOfDay.toISOString();
+
+    const freshHealth = {};
+
+    // Helper to get counts
+    const getCounts = async (topics, isDestination) => {
+      const counts = {};
+      if (isDestination) {
+        const countQuery = `SELECT count(*) as count FROM events WHERE status = 'SUCCESS' AND timestamp >= ?`;
+        const row = await new Promise(resolve => db.get(countQuery, [startOfDayStr], (err, r) => resolve(r)));
+        topics.forEach(t => counts[t] = row ? row.count : 0);
+      } else {
+        for (const t of topics) {
+          const countQuery = `SELECT count(*) as count FROM topic_messages WHERE topic = ? AND timestamp >= ?`;
+          const row = await new Promise(resolve => db.get(countQuery, [t, startOfDayStr], (err, r) => resolve(r)));
+          counts[t] = row ? row.count : 0;
+        }
+      }
+      return counts;
+    };
+
+    // Iterate over configured clusters to preserve order/config
+    if (fs.existsSync(CONFIG_FILE)) {
+      const config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+
+      // Source Clusters
+      for (const cluster of config.source_clusters) {
+        const cached = dashboardStats.clusterHealth.get(cluster.bootstrap_servers) || { status: 'pending', metadata: {} };
+        const topicNames = cluster.topics.map(t => t.topic);
+        const freshCounts = await getCounts(topicNames, false);
+
+        freshHealth[cluster.bootstrap_servers] = {
+          ...cached,
+          metadata: {
+            ...cached.metadata,
+            topicMessages: freshCounts
+          }
+        };
+      }
+
+      // Destination Cluster
+      if (config.destination_cluster) {
+        const cluster = config.destination_cluster;
+        const cached = dashboardStats.clusterHealth.get(cluster.bootstrap_servers) || { status: 'pending', metadata: {} };
+        const topicNames = [cluster.topic];
+        const freshCounts = await getCounts(topicNames, true);
+
+        freshHealth[cluster.bootstrap_servers] = {
+          ...cached,
+          metadata: {
+            ...cached.metadata,
+            topicMessages: freshCounts
+          }
+        };
+      }
+    }
+
+    res.json(freshHealth);
   } catch (error) {
     console.error("Error in on-demand health check:", error);
     res.status(500).json({ error: "Health check failed" });
@@ -531,16 +588,21 @@ app.post('/api/debug/reset', (req, res) => {
       db.run("DELETE FROM events");
       db.run("DELETE FROM topic_messages");
       db.run("DELETE FROM errors");
-      db.run("VACUUM");
+      db.run("VACUUM", (err) => {
+        if (err) {
+          console.error("Error resetting DB:", err);
+          return res.status(500).json({ error: "Failed to reset DB" });
+        }
+
+        // 3. Reset Stats (after DB is clear)
+        dashboardStats = {
+          clusterHealth: new Map()
+        };
+
+        console.log("System state reset via API");
+        res.json({ message: "System reset complete" });
+      });
     });
-
-    // 3. Reset Stats
-    dashboardStats = {
-      clusterHealth: new Map()
-    };
-
-    console.log("System state reset via API");
-    res.json({ message: "System reset complete" });
   } catch (error) {
     console.error("Error resetting system:", error);
     res.status(500).json({ error: "Failed to reset system" });
@@ -627,6 +689,17 @@ app.get('/api/dashboard', async (req, res) => {
     });
 
     const chartDataMap = new Map();
+
+    // Pre-fill last 6 buckets (30 mins) to ensure chart continuity
+    const now = new Date();
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getTime() - i * 5 * 60000);
+      const hours = d.getHours().toString().padStart(2, '0');
+      const minutes = (Math.floor(d.getMinutes() / 5) * 5).toString().padStart(2, '0');
+      const timeKey = `${hours}:${minutes}`;
+      chartDataMap.set(timeKey, { time: timeKey, messages: 0, errors: 0 });
+    }
+
     chartRows.forEach(row => {
       if (!chartDataMap.has(row.time)) {
         chartDataMap.set(row.time, { time: row.time, messages: 0, errors: 0 });
@@ -725,26 +798,6 @@ app.get('/api/logs/search', async (req, res) => {
 // WebSocket for Log Streaming
 wss.on('connection', (ws) => {
   console.log('Client connected to log stream');
-
-  // Send last 50 lines on connection (Optional, simple implementation)
-  if (fs.existsSync(LOG_FILE)) {
-    try {
-      // Read a small chunk from the end to get context
-      const stats = fs.statSync(LOG_FILE);
-      const readSize = Math.min(10000, stats.size); // Read last 10KB
-      const buffer = Buffer.alloc(readSize);
-      const fd = fs.openSync(LOG_FILE, 'r');
-      fs.readSync(fd, buffer, 0, readSize, stats.size - readSize);
-      fs.closeSync(fd);
-
-      const lines = buffer.toString('utf8').split('\n').slice(-50);
-      lines.forEach(line => {
-        if (line.trim()) ws.send(line);
-      });
-    } catch (e) {
-      console.error("Error reading initial logs for websocket:", e);
-    }
-  }
 });
 
 server.listen(PORT, () => {
