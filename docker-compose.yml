@@ -102,3 +102,26 @@ services:
       CONTROL_CENTER_MONITORING_INTERCEPTOR_TOPIC_PARTITIONS: 1
       CONFLUENT_METRICS_TOPIC_REPLICATION: 1
       PORT: 9021
+
+  # --- Backend Service ---
+  backend:
+    image: ms-tra-transaction-integrator-cobranza:latest
+    hostname: backend
+    container_name: backend
+    ports:
+      - "8080:8080"
+    depends_on:
+      - broker-source-1
+      - broker-source-2
+      - broker-dest
+      - schema-registry
+    entrypoint: ["java", "-cp", "/opt/ms-tra-transaction-integrator-cobranza-0.0.1.jar", "-Dloader.path=/app/src/main/resources/", "org.springframework.boot.loader.launch.PropertiesLauncher"]
+    volumes:
+      - ./logs:/opt/logs
+      - ./config.docker.json:/app/src/main/resources/config.json
+      - ./config.docker.json:/app/config.json
+      - ./config.docker.json:/config.json
+      - ./config.docker.json:/app/resources/config.json
+      - ./config.docker.json:/opt/config.json
+      - ./config.docker.json:/opt/resources/config.json
+      - ./config.docker.json:/src/main/resources/config.json

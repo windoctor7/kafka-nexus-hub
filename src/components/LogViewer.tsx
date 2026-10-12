@@ -1,5 +1,4 @@
 import { useEffect, useState, useRef } from 'react';
-import { SIDECAR_WS } from '@/lib/api';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { Terminal, XCircle, CheckCircle, Info, AlertTriangle } from 'lucide-react';
@@ -12,7 +11,12 @@ interface LogEntry {
     context?: string;
 }
 
-export const LogViewer = () => {
+interface LogViewerProps {
+    title?: string;
+    wsUrl?: string;
+}
+
+export const LogViewer = ({ title = "Live Logs", wsUrl }: LogViewerProps) => {
     const [logs, setLogs] = useState<LogEntry[]>([]);
     const [isConnected, setIsConnected] = useState(false);
     const wsRef = useRef<WebSocket | null>(null);
@@ -35,7 +39,9 @@ export const LogViewer = () => {
     }, [logs]);
 
     const connect = () => {
-        const ws = new WebSocket(SIDECAR_WS);
+        // Use prop or default. 
+        const targetUrl = wsUrl || "ws://localhost:3001/logs";
+        const ws = new WebSocket(targetUrl);
         wsRef.current = ws;
 
         ws.onopen = () => {

@@ -8,6 +8,7 @@ import { createServer } from 'http';
 import { Kafka, logLevel } from 'kafkajs';
 import { publish } from './publish_test_events.js';
 import { LogRepositoryFactory } from './log_repository.js';
+import { IntegratorRepository } from './integrator_repository.js';
 import sqlite3 from 'sqlite3';
 
 // ... (existing imports)
@@ -23,9 +24,14 @@ const wss = new WebSocketServer({ server });
 const PORT = 3001;
 
 // Paths relative to where this script is run (kafka-nexus-hub)
-const BACKEND_DIR = path.resolve(__dirname, '../codigo/ms-tra-transaction-integrator-cobranza');
-const CONFIG_FILE = path.join(BACKEND_DIR, 'src/main/resources/config.json');
-const LOG_FILE = path.join(BACKEND_DIR, 'logs/integration-events.json');
+// Paths relative to where this script is run (kafka-nexus-hub)
+// Paths relative to where this script is run (kafka-nexus-hub)
+const CONFIG_FILE = path.join(__dirname, 'config.json');
+// Assuming logs might also keep being separate or relative, 
+// but if user put config in root, let's look for logs nearby or default to a safe place.
+// For now, let's assume logs are in a 'logs' folder in root or stick to previous logic if not specified.
+// However, the error was about config. Let's fix config first.
+const LOG_FILE = path.join(__dirname, 'logs', 'integration-events.json');
 const DB_FILE = path.join(__dirname, 'dashboard.db');
 
 // --- Log Repository Setup ---
@@ -39,8 +45,13 @@ const logRepository = LogRepositoryFactory.create(SEARCH_PROVIDER, {
   index: 'kafka-logs'
 });
 
-// Initialize Repo
-logRepository.init().catch(err => console.error("Failed to init log repository:", err));
+// Initialize Repos
+const integratorRepository = new IntegratorRepository(DB_FILE);
+
+Promise.all([
+  logRepository.init(),
+  integratorRepository.init()
+]).catch(err => console.error("Failed to init repositories:", err));
 
 app.use(cors());
 app.use(express.json());
@@ -192,7 +203,63 @@ function restoreBuffers(events, topicMsgs, errors) {
 
 setInterval(flushBuffers, BATCH_INTERVAL_MS);
 
-// --- In-Memory Stats (Cache/Legacy) ---
+// --- Integrator API ---
+
+app.get('/api/integrators', async (req, res) => {
+  try {
+    const integrators = await integratorRepository.getAll();
+    res.json(integrators);
+  } catch (err) {
+    console.error("Error getting integrators:", err);
+    res.status(500).json({ error: "Failed to fetch integrators" });
+  }
+});
+
+app.post('/api/integrators', async (req, res) => {
+  try {
+    const integrator = req.body;
+    if (!integrator.id || !integrator.name) {
+      return res.status(400).json({ error: "ID and Name are required" });
+    }
+    await integratorRepository.add(integrator);
+    res.status(201).json(integrator);
+  } catch (err) {
+    console.error("Error adding integrator:", err);
+    res.status(500).json({ error: "Failed to add integrator" });
+  }
+});
+
+app.put('/api/integrators/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+
+    if (updates.id && updates.id !== id) {
+      return res.status(400).json({ error: "ID mismatch" });
+    }
+
+    // Ensure ID is passed to repo
+    updates.id = id;
+
+    await integratorRepository.update(updates);
+    res.json(updates);
+  } catch (err) {
+    console.error("Error updating integrator:", err);
+    res.status(500).json({ error: "Failed to update integrator" });
+  }
+});
+
+app.delete('/api/integrators/:id', async (req, res) => {
+  try {
+    await integratorRepository.remove(req.params.id);
+    res.status(204).send();
+  } catch (err) {
+    console.error("Error removing integrator:", err);
+    res.status(500).json({ error: "Failed to remove integrator" });
+  }
+});
+
+// --- Existing In-Memory Stats (Cache/Legacy) ---
 let dashboardStats = {
   clusterHealth: new Map() // Keep this for health checks
 };
@@ -277,33 +344,86 @@ async function checkCluster(bootstrapServers, topicsToCheck = [], isDestination 
   }
 }
 
-async function checkClusterHealth() {
-  try {
-    if (!fs.existsSync(CONFIG_FILE)) return;
-    const config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+// --- Health Check Logic ---
 
-    // Check Source Clusters
+// Track last check time per integrator
+const integratorLastCheck = new Map();
+
+async function checkClusterHealthForConfig(config) {
+  if (!config) return;
+
+  // Check Source Clusters
+  if (config.source_clusters) {
     for (const cluster of config.source_clusters) {
       const topicNames = cluster.topics.map(t => t.topic);
       const result = await checkCluster(cluster.bootstrap_servers, topicNames, false);
       dashboardStats.clusterHealth.set(cluster.bootstrap_servers, result);
     }
+  }
 
-    // Check Destination Cluster
-    if (config.destination_cluster) {
-      const topicNames = [config.destination_cluster.topic];
-      const result = await checkCluster(config.destination_cluster.bootstrap_servers, topicNames, true);
-      dashboardStats.clusterHealth.set(config.destination_cluster.bootstrap_servers, result);
+  // Check Destination Cluster
+  if (config.destination_cluster) {
+    const cluster = config.destination_cluster;
+    if (cluster && cluster.bootstrap_servers) {
+      const topicNames = [cluster.topic];
+      const result = await checkCluster(cluster.bootstrap_servers, topicNames, true);
+      dashboardStats.clusterHealth.set(cluster.bootstrap_servers, result);
     }
-  } catch (e) {
-    console.error("Error in health check:", e);
   }
 }
 
-// Run health check every 30 seconds
-setInterval(checkClusterHealth, 30000);
-// Run once on startup
-checkClusterHealth();
+// Master Loop
+setInterval(async () => {
+  try {
+    const integrators = await integratorRepository.getAll();
+    const now = Date.now();
+    let hasRunFileFallback = false;
+
+    for (const integrator of integrators) {
+      let config = integrator.configuration;
+      let isFileFallback = false;
+
+      if (typeof config === 'string') {
+        try { config = JSON.parse(config); } catch (e) { }
+      }
+
+      // Fallback to legacy config.json if no DB config
+      if (!config && fs.existsSync(CONFIG_FILE)) {
+        // We only want to run the file-based check ONCE per loop, not for every integrator missing config
+        // OR, we assume the "Local Dev Integrator" uses the file.
+        // Let's attach file config to any integrator missing one for now.
+        try {
+          config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+          isFileFallback = true;
+        } catch (e) { }
+      }
+
+      if (config) {
+        const intervalSeconds = config.monitoringInterval || 30;
+        const intervalMs = intervalSeconds * 1000;
+        const lastCheck = integratorLastCheck.get(integrator.id) || 0;
+
+        if (now - lastCheck > intervalMs) {
+          integratorLastCheck.set(integrator.id, now);
+
+          // Run Check
+          await checkClusterHealthForConfig(config);
+
+          // Update Status in DB
+          const isOnline = Array.from(dashboardStats.clusterHealth.values()).every(s => s.status === 'online');
+          await integratorRepository.updateStatus(integrator.id, isOnline ? 'online' : 'warning');
+        }
+      }
+    }
+  } catch (e) {
+    console.error("Master Health Loop Error:", e);
+  }
+}, 1000);
+
+// Legacy function kept for manual invocation if needed, but essentially replaced by loop
+async function checkClusterHealth() {
+  // No-op or trigger manual check for all?
+}
 
 function processLogLine(line) {
   if (!line || !line.trim()) return;
@@ -386,28 +506,42 @@ function broadcastToClients(line) {
   });
 }
 
-function updateLogs() {
-  if (isProcessingLogs) return; // Skip if already running
-  if (!fs.existsSync(LOG_FILE)) return;
+const fileStates = new Map(); // path -> { size: number, isProcessing: boolean }
 
-  isProcessingLogs = true;
+// Helper to process a single file
+function processLogFile(filePath) {
+  let state = fileStates.get(filePath);
+
+  // Initialize state if new file
+  if (!state) {
+    try {
+      if (!fs.existsSync(filePath)) return;
+      // Start from 0 to capture history (consistent with previous behavior)
+      state = { size: 0, isProcessing: false };
+      fileStates.set(filePath, state);
+    } catch (e) { return; }
+  }
+
+  if (state.isProcessing) return;
+  if (!fs.existsSync(filePath)) return;
+
+  state.isProcessing = true;
   try {
-    const stats = fs.statSync(LOG_FILE);
+    const stats = fs.statSync(filePath);
     const currentSize = stats.size;
 
-    if (currentSize < lastFileSize) {
-      // File rotated (new day or truncated)
-      console.log("Log file rotated. Resetting stats.");
-      lastFileSize = 0;
+    if (currentSize < state.size) {
+      // File rotated
+      console.log(`Log file rotated: ${filePath}. Resetting stats.`);
+      state.size = 0;
       resetStats();
     }
 
-    if (currentSize > lastFileSize) {
-      // If reading more than 1MB, assume catch-up and suppress broadcast
-      const isCatchUp = (currentSize - lastFileSize) > 1024 * 1024;
+    if (currentSize > state.size) {
+      const isCatchUp = (currentSize - state.size) > 1024 * 1024; // 1MB batch
 
-      const stream = fs.createReadStream(LOG_FILE, {
-        start: lastFileSize,
+      const stream = fs.createReadStream(filePath, {
+        start: state.size,
         end: currentSize,
         encoding: 'utf8'
       });
@@ -416,8 +550,7 @@ function updateLogs() {
       stream.on('data', (chunk) => {
         buffer += chunk;
         const lines = buffer.split('\n');
-        // Keep the last part if it's not a complete line
-        buffer = lines.pop();
+        buffer = lines.pop(); // Keep partial line
 
         lines.forEach(line => {
           if (line.trim()) {
@@ -432,26 +565,53 @@ function updateLogs() {
           processLogLine(buffer);
           if (!isCatchUp) broadcastToClients(buffer);
         }
-        lastFileSize = currentSize;
-        isProcessingLogs = false;
-        if (isCatchUp) console.log("Catch-up complete. Resuming broadcasts.");
+        state.size = currentSize;
+        state.isProcessing = false;
       });
 
       stream.on('error', (err) => {
-        console.error("Stream error:", err);
-        isProcessingLogs = false;
+        console.error(`Stream error for ${filePath}:`, err);
+        state.isProcessing = false;
       });
     } else {
-      isProcessingLogs = false;
+      state.isProcessing = false;
     }
   } catch (e) {
-    console.error("Error updating logs:", e);
-    isProcessingLogs = false;
+    console.error(`Error updating log ${filePath}:`, e);
+    state.isProcessing = false;
+  }
+}
+
+async function updateAllLogs() {
+  const paths = new Set();
+
+  // Default Log File (Legacy/Fallback)
+  if (fs.existsSync(LOG_FILE)) paths.add(LOG_FILE);
+
+  // Integrator Configured Paths
+  try {
+    const integrators = await integratorRepository.getAll();
+    integrators.forEach(i => {
+      if (i.configuration) {
+        try {
+          const c = typeof i.configuration === 'string' ? JSON.parse(i.configuration) : i.configuration;
+          if (c.logFilePath && fs.existsSync(c.logFilePath)) {
+            paths.add(c.logFilePath);
+          }
+        } catch (e) { }
+      }
+    });
+  } catch (e) {
+    console.error("Failed to fetch integrators for logs:", e);
+  }
+
+  for (const path of paths) {
+    processLogFile(path);
   }
 }
 
 // Start polling for logs
-setInterval(updateLogs, 1000);
+setInterval(updateAllLogs, 1000);
 
 // --- API Endpoints ---
 
@@ -459,7 +619,12 @@ setInterval(updateLogs, 1000);
 app.get('/api/config', (req, res) => {
   try {
     if (!fs.existsSync(CONFIG_FILE)) {
-      return res.status(404).json({ error: 'Config file not found' });
+      console.warn("Serving default mock config (file not found)");
+      const mockConfig = {
+        source_clusters: [{ bootstrap_servers: "localhost:9097", topics: [{ topic: "TOPIC.A" }] }],
+        destination_cluster: { bootstrap_servers: "localhost:9099", topic: "INTEGRATED.TOPIC" }
+      };
+      return res.json(mockConfig);
     }
     const config = fs.readFileSync(CONFIG_FILE, 'utf8');
     res.json(JSON.parse(config));
@@ -528,23 +693,38 @@ app.get('/api/health/check', async (req, res) => {
       return counts;
     };
 
-    // Iterate over configured clusters to preserve order/config
-    if (fs.existsSync(CONFIG_FILE)) {
-      const config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+    // Iterate over configured clusters
+    // Try to get config from DB if integratorId present, else file
+    let config = null;
+    if (req.query.integratorId) {
+      try {
+        const integrator = (await integratorRepository.getAll()).find(i => i.id === req.query.integratorId);
+        if (integrator && integrator.configuration) {
+          config = typeof integrator.configuration === 'string' ? JSON.parse(integrator.configuration) : integrator.configuration;
+        }
+      } catch (e) { console.error("Error loading integrator config:", e); }
+    }
 
+    if (!config && fs.existsSync(CONFIG_FILE)) {
+      config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+    }
+
+    if (config) {
       // Source Clusters
-      for (const cluster of config.source_clusters) {
-        const cached = dashboardStats.clusterHealth.get(cluster.bootstrap_servers) || { status: 'pending', metadata: {} };
-        const topicNames = cluster.topics.map(t => t.topic);
-        const freshCounts = await getCounts(topicNames, false);
+      if (config.source_clusters) {
+        for (const cluster of config.source_clusters) {
+          const cached = dashboardStats.clusterHealth.get(cluster.bootstrap_servers) || { status: 'pending', metadata: {} };
+          const topicNames = cluster.topics.map(t => t.topic);
+          const freshCounts = await getCounts(topicNames, false);
 
-        freshHealth[cluster.bootstrap_servers] = {
-          ...cached,
-          metadata: {
-            ...cached.metadata,
-            topicMessages: freshCounts
-          }
-        };
+          freshHealth[cluster.bootstrap_servers] = {
+            ...cached,
+            metadata: {
+              ...cached.metadata,
+              topicMessages: freshCounts
+            }
+          };
+        }
       }
 
       // Destination Cluster
@@ -612,7 +792,22 @@ app.post('/api/debug/reset', (req, res) => {
 // Dashboard API - Persistent!
 app.get('/api/dashboard', async (req, res) => {
   try {
-    const config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+    let config = null;
+    if (req.query.integratorId) {
+      try {
+        // Optimization: Add get(id) to repo? For now getAll() find is fine for small count
+        const integrator = (await integratorRepository.getAll()).find(i => i.id === req.query.integratorId);
+        if (integrator && integrator.configuration) {
+          config = typeof integrator.configuration === 'string' ? JSON.parse(integrator.configuration) : integrator.configuration;
+        }
+      } catch (e) { }
+    }
+
+    if (!config && fs.existsSync(CONFIG_FILE)) {
+      config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+    }
+
+    if (!config) config = {}; // Empty safe
     const startOfDay = new Date();
     startOfDay.setHours(0, 0, 0, 0);
     const startOfDayStr = startOfDay.toISOString();
@@ -776,6 +971,24 @@ app.get('/api/dashboard', async (req, res) => {
   } catch (error) {
     console.error("Error generating dashboard data:", error);
     res.status(500).json({ error: "Failed to generate dashboard data" });
+  }
+});
+
+// Update Config Endpoint
+app.post('/api/config', (req, res) => {
+  try {
+    const newConfig = req.body;
+    // Basic validation
+    if (!newConfig.source_clusters || !newConfig.destination_cluster) {
+      return res.status(400).json({ error: "Invalid config structure" });
+    }
+
+    fs.writeFileSync(CONFIG_FILE, JSON.stringify(newConfig, null, 2));
+    console.log("Config updated via API");
+    res.json({ message: "Configuration updated successfully" });
+  } catch (error) {
+    console.error("Error updating config:", error);
+    res.status(500).json({ error: "Failed to update configuration" });
   }
 });
 

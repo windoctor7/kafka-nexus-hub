@@ -7,11 +7,11 @@ describe('Clusters Page Topology (Real Data)', () => {
 
         // 2. Run K6 Load Test (Deterministic)
         // Path to K6 script
-        const k6ScriptPath = '../codigo/ms-tra-transaction-integrator-cobranza/tests/k6/cypress_test.js';
+        const k6ScriptPath = 'tests/k6/cypress_test.js';
 
         // Run K6 with 50 iterations
         // We enforce failOnNonZeroExit: true to ensure the backend is actually running and reachable
-        cy.exec(`k6 run ${k6ScriptPath}`, { failOnNonZeroExit: true, timeout: 60000 }).then((result) => {
+        cy.exec(`./k6 run ${k6ScriptPath}`, { failOnNonZeroExit: true, timeout: 60000 }).then((result) => {
             cy.log('K6 Output:', result.stdout);
         });
     });

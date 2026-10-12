@@ -1,10 +1,12 @@
 import { useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
-import { Server, Activity, AlertTriangle, XCircle, Plus, ArrowRight } from 'lucide-react';
+import { Server, Activity, AlertTriangle, XCircle, Plus, ArrowRight, Trash2, Pencil } from 'lucide-react';
 import { useIntegrator, Integrator } from '@/contexts/IntegratorContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import AddIntegratorDialog from '@/components/integrator/AddIntegratorDialog';
+import { toast } from "sonner";
+
 const statusConfig = {
   online: {
     color: 'text-green-400',
@@ -34,10 +36,12 @@ const statusConfig = {
 
 const IntegratorCard = ({
   integrator,
-  onSelect
+  onSelect,
+  onDelete
 }: {
   integrator: Integrator;
   onSelect: () => void;
+  onDelete: () => void;
 }) => {
   const status = statusConfig[integrator.status];
   const StatusIcon = status.icon;
@@ -48,7 +52,36 @@ const IntegratorCard = ({
       animate={{ opacity: 1, y: 0 }}
       whileHover={{ scale: 1.02, y: -4 }}
       transition={{ duration: 0.2 }}
+      className="group relative"
     >
+      <div className="absolute top-2 right-2 z-20 opacity-0 group-hover:opacity-100 transition-opacity flex gap-2">
+        <AddIntegratorDialog
+          initialData={integrator}
+          trigger={
+            <Button
+              variant="secondary"
+              size="icon"
+              className="h-8 w-8 rounded-full shadow-lg hover:bg-white"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <Pencil className="h-4 w-4 text-black" />
+            </Button>
+          }
+        />
+        <Button
+          variant="destructive"
+          size="icon"
+          className="h-8 w-8 rounded-full shadow-lg"
+          onClick={(e) => {
+            e.stopPropagation();
+            if (confirm(`¿Estás seguro de eliminar el integrador "${integrator.name}"?`)) {
+              onDelete();
+            }
+          }}
+        >
+          <Trash2 className="h-4 w-4" />
+        </Button>
+      </div>
       <Card
         className={`cursor-pointer border-2 ${status.borderColor} bg-card/50 backdrop-blur-sm hover:bg-card/80 transition-all duration-300 shadow-lg ${status.glowColor}`}
         onClick={onSelect}
@@ -68,7 +101,7 @@ const IntegratorCard = ({
                 </div>
               </div>
             </div>
-            <ArrowRight className="w-5 h-5 text-muted-foreground" />
+            <ArrowRight className="w-5 h-5 text-muted-foreground group-hover:text-primary transition-colors" />
           </div>
         </CardHeader>
         <CardContent>
@@ -91,14 +124,25 @@ const IntegratorCard = ({
 
 const IntegratorSelect = () => {
   const navigate = useNavigate();
-  const { integrators, setSelectedIntegrator } = useIntegrator();
+  const { integrators, setSelectedIntegrator, removeIntegrator } = useIntegrator();
 
   const handleSelectIntegrator = (integrator: Integrator) => {
     setSelectedIntegrator(integrator);
     navigate('/dashboard');
   };
 
+  const handleDelete = async (id: string, name: string) => {
+    try {
+      await removeIntegrator(id);
+      toast.success(`Integrator "${name}" removed`);
+    } catch (e) {
+      toast.error("Failed to remove integrator");
+    }
+  };
+
   const onlineCount = integrators.filter(i => i.status === 'online').length;
+  // ... rest of component ...
+
   const warningCount = integrators.filter(i => i.status === 'warning').length;
   const offlineCount = integrators.filter(i => i.status === 'offline').length;
 
@@ -177,6 +221,7 @@ const IntegratorSelect = () => {
               <IntegratorCard
                 integrator={integrator}
                 onSelect={() => handleSelectIntegrator(integrator)}
+                onDelete={() => handleDelete(integrator.id, integrator.name)}
               />
             </motion.div>
           ))}

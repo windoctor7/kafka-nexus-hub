@@ -1,256 +1,299 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { MainLayout } from "@/components/layout/MainLayout";
 import { motion } from "framer-motion";
-import { destinationCluster } from "@/data/mockData";
-import {
-  Settings as SettingsIcon,
-  Server,
-  Bell,
-  Shield,
-  Database,
-  RefreshCw,
-  Save,
-  AlertTriangle,
-} from "lucide-react";
+import { Save, Plus, X, Server, Clock, Activity, ArrowRight, Zap, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { cn } from "@/lib/utils";
+import { useIntegrator } from "@/contexts/IntegratorContext";
+import { toast } from "sonner";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { fetchConfig } from "@/lib/api";
+import { Label } from "@/components/ui/label";
+
+interface SourceClusterConfig {
+  bootstrap_servers: string;
+  topics: { topic: string }[];
+}
+
+interface DestinationClusterConfig {
+  bootstrap_servers: string;
+  topic: string;
+}
 
 const Settings = () => {
-  const [destination, setDestination] = useState(destinationCluster);
-  const [retryConfig, setRetryConfig] = useState({
-    maxRetries: 3,
-    retryDelay: 1000,
-    backoffMultiplier: 2,
-  });
-  const [notifications, setNotifications] = useState({
-    errorAlerts: true,
-    performanceAlerts: true,
-    weeklyReports: false,
-    slackWebhook: "",
-  });
+  const { selectedIntegrator, updateIntegrator } = useIntegrator();
+
+  // Form States
+  const [monitoringInterval, setMonitoringInterval] = useState<number>(30);
+  const [logFilePath, setLogFilePath] = useState<string>("");
+  const [sourceClusters, setSourceClusters] = useState<SourceClusterConfig[]>([{ bootstrap_servers: "", topics: [{ topic: "" }] }]);
+  const [destinationCluster, setDestinationCluster] = useState<DestinationClusterConfig>({ bootstrap_servers: "", topic: "" });
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    if (selectedIntegrator) {
+      // Priority: Local DB Config > Remote Config > Default Empty
+      const loadData = async () => {
+        let config: any = null;
+
+        if (selectedIntegrator.configuration) {
+          config = typeof selectedIntegrator.configuration === 'string'
+            ? JSON.parse(selectedIntegrator.configuration)
+            : selectedIntegrator.configuration;
+        } else if (selectedIntegrator.apiUrl) {
+          try {
+            config = await fetchConfig(selectedIntegrator.apiUrl);
+          } catch (e) {
+            console.error("Failed to load remote template");
+          }
+        }
+
+        if (config) {
+          setMonitoringInterval(config.monitoringInterval || 30);
+          setLogFilePath(config.logFilePath || "/var/log/app.log"); // Default placeholder
+
+          if (config.source_clusters && Array.isArray(config.source_clusters)) {
+            setSourceClusters(config.source_clusters);
+          }
+
+          if (config.destination_cluster) {
+            setDestinationCluster(config.destination_cluster);
+          }
+        }
+      };
+      loadData();
+    }
+  }, [selectedIntegrator?.id]);
+
+
+  // Handlers
+  const handleSourceChange = (index: number, field: keyof SourceClusterConfig, value: any) => {
+    const newSources = [...sourceClusters];
+    // @ts-ignore
+    newSources[index][field] = value;
+    setSourceClusters(newSources);
+  };
+
+  const handleTopicChange = (clusterIndex: number, topicString: string) => {
+    const topics = topicString.split(',').map(t => ({ topic: t.trim() })).filter(t => t.topic.length > 0);
+    const newSources = [...sourceClusters];
+    newSources[clusterIndex].topics = topics;
+    setSourceClusters(newSources);
+  };
+
+  const addSourceCluster = () => {
+    setSourceClusters([...sourceClusters, { bootstrap_servers: "", topics: [{ topic: "" }] }]);
+  };
+
+  const removeSourceCluster = (index: number) => {
+    if (sourceClusters.length === 1) return;
+    setSourceClusters(sourceClusters.filter((_, i) => i !== index));
+  };
+
+  const handleSave = async () => {
+    if (!selectedIntegrator) return;
+
+    setIsSaving(true);
+    try {
+      const configObject = {
+        monitoringInterval,
+        logFilePath, // New Field
+        source_clusters: sourceClusters,
+        destination_cluster: destinationCluster
+      };
+
+      await updateIntegrator({
+        ...selectedIntegrator,
+        configuration: configObject
+      });
+
+      toast.success("Configuración guardada", {
+        description: "Los parámetros de monitoreo han sido actualizados."
+      });
+    } catch (error) {
+      console.error("Save error:", error);
+      toast.error("Error al guardar la configuración");
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   return (
     <MainLayout>
-      <div className="space-y-8">
+      <div className="max-w-4xl mx-auto py-8 space-y-8 pb-20">
         {/* Header */}
-        <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }}>
-          <h1 className="text-3xl font-bold text-foreground">
-            <span className="text-primary text-glow-cyan">Configuración</span> Global
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Ajustes generales del integrador de transacciones
-          </p>
-        </motion.div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Destination Cluster */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.1 }}
-            className="glass-card p-6"
-          >
-            <div className="flex items-center gap-3 mb-6">
-              <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                <Server className="w-5 h-5 text-primary" />
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold text-foreground">Cluster Destino</h3>
-                <p className="text-sm text-muted-foreground">Configuración del tópico de salida</p>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Nombre</label>
-                <Input value={destination.name} readOnly className="bg-muted/30" />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Bootstrap Servers</label>
-                <Input
-                  value={destination.bootstrapServers}
-                  onChange={(e) => setDestination({ ...destination, bootstrapServers: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Tópico de Salida</label>
-                <Input
-                  value={destination.topic}
-                  onChange={(e) => setDestination({ ...destination, topic: e.target.value })}
-                />
-              </div>
-            </div>
-          </motion.div>
-
-          {/* Retry Configuration */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.2 }}
-            className="glass-card p-6"
-          >
-            <div className="flex items-center gap-3 mb-6">
-              <div className="w-10 h-10 rounded-lg bg-warning/10 flex items-center justify-center">
-                <RefreshCw className="w-5 h-5 text-warning" />
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold text-foreground">Políticas de Retry</h3>
-                <p className="text-sm text-muted-foreground">Configuración de reintentos</p>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Máximo de Reintentos</label>
-                <Input
-                  type="number"
-                  value={retryConfig.maxRetries}
-                  onChange={(e) => setRetryConfig({ ...retryConfig, maxRetries: Number(e.target.value) })}
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Delay Inicial (ms)</label>
-                <Input
-                  type="number"
-                  value={retryConfig.retryDelay}
-                  onChange={(e) => setRetryConfig({ ...retryConfig, retryDelay: Number(e.target.value) })}
-                />
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium text-foreground">Multiplicador de Backoff</label>
-                <Input
-                  type="number"
-                  step="0.1"
-                  value={retryConfig.backoffMultiplier}
-                  onChange={(e) =>
-                    setRetryConfig({ ...retryConfig, backoffMultiplier: Number(e.target.value) })
-                  }
-                />
-              </div>
-            </div>
-          </motion.div>
-
-          {/* Notifications */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.3 }}
-            className="glass-card p-6"
-          >
-            <div className="flex items-center gap-3 mb-6">
-              <div className="w-10 h-10 rounded-lg bg-accent/10 flex items-center justify-center">
-                <Bell className="w-5 h-5 text-accent" />
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold text-foreground">Notificaciones</h3>
-                <p className="text-sm text-muted-foreground">Alertas y reportes</p>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              {[
-                { key: "errorAlerts", label: "Alertas de Error", desc: "Notificar errores críticos" },
-                { key: "performanceAlerts", label: "Alertas de Rendimiento", desc: "Latencia alta o bajo throughput" },
-                { key: "weeklyReports", label: "Reportes Semanales", desc: "Resumen semanal por email" },
-              ].map((item) => (
-                <label
-                  key={item.key}
-                  className="flex items-center justify-between p-3 rounded-lg border border-border/50 hover:border-primary/30 transition-colors cursor-pointer"
-                >
-                  <div>
-                    <p className="font-medium text-foreground">{item.label}</p>
-                    <p className="text-sm text-muted-foreground">{item.desc}</p>
-                  </div>
-                  <button
-                    onClick={() =>
-                      setNotifications({
-                        ...notifications,
-                        [item.key]: !notifications[item.key as keyof typeof notifications],
-                      })
-                    }
-                    className={cn(
-                      "relative w-12 h-6 rounded-full transition-colors",
-                      notifications[item.key as keyof typeof notifications]
-                        ? "bg-primary"
-                        : "bg-muted"
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "absolute top-0.5 w-5 h-5 rounded-full bg-foreground transition-transform",
-                        notifications[item.key as keyof typeof notifications]
-                          ? "translate-x-6"
-                          : "translate-x-0.5"
-                      )}
-                    />
-                  </button>
-                </label>
-              ))}
-
-              <div className="space-y-2 pt-2">
-                <label className="text-sm font-medium text-foreground">Slack Webhook URL</label>
-                <Input
-                  value={notifications.slackWebhook}
-                  onChange={(e) => setNotifications({ ...notifications, slackWebhook: e.target.value })}
-                  placeholder="https://hooks.slack.com/services/..."
-                />
-              </div>
-            </div>
-          </motion.div>
-
-          {/* Danger Zone */}
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.4 }}
-            className="glass-card p-6 border-destructive/30"
-          >
-            <div className="flex items-center gap-3 mb-6">
-              <div className="w-10 h-10 rounded-lg bg-destructive/10 flex items-center justify-center">
-                <AlertTriangle className="w-5 h-5 text-destructive" />
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold text-foreground">Zona de Peligro</h3>
-                <p className="text-sm text-muted-foreground">Acciones irreversibles</p>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              <div className="flex items-center justify-between p-4 rounded-lg border border-destructive/30 bg-destructive/5">
-                <div>
-                  <p className="font-medium text-foreground">Limpiar Cola de Errores</p>
-                  <p className="text-sm text-muted-foreground">Elimina todos los mensajes en cola de DLQ</p>
-                </div>
-                <Button variant="destructive" size="sm">
-                  Limpiar
-                </Button>
-              </div>
-              <div className="flex items-center justify-between p-4 rounded-lg border border-destructive/30 bg-destructive/5">
-                <div>
-                  <p className="font-medium text-foreground">Reset de Offsets</p>
-                  <p className="text-sm text-muted-foreground">Reinicia los consumer group offsets</p>
-                </div>
-                <Button variant="destructive" size="sm">
-                  Resetear
-                </Button>
-              </div>
-            </div>
-          </motion.div>
-        </div>
-
-        {/* Save Button */}
         <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.5 }}
-          className="flex justify-end"
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex items-center justify-between"
         >
-          <Button variant="neon" size="lg" className="gap-2">
-            <Save className="w-5 h-5" />
-            Guardar Configuración
+          <div>
+            <h1 className="text-3xl font-bold text-foreground">
+              <span className="text-primary text-glow-cyan">Configuración</span> de Monitoreo
+            </h1>
+            <p className="text-muted-foreground mt-1">
+              Define los parámetros para el monitoreo activo de la infraestructura Kafka.
+            </p>
+          </div>
+          <Button onClick={handleSave} disabled={isSaving} className="gap-2" size="lg">
+            <Save className="w-4 h-4" />
+            {isSaving ? 'Guardando...' : 'Guardar Cambios'}
           </Button>
         </motion.div>
+
+        {/* 1. General Settings */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+        >
+          <Card className="border-border/50 bg-card/30 backdrop-blur-sm">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Clock className="w-5 h-5 text-primary" />
+                Configuración General
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              {/* Interval */}
+              <div className="grid gap-2 max-w-sm">
+                <Label>Frecuencia de Health Check (segundos)</Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    min="5"
+                    max="300"
+                    value={monitoringInterval}
+                    onChange={(e) => setMonitoringInterval(parseInt(e.target.value) || 30)}
+                  />
+                  <span className="text-sm text-muted-foreground">segundos</span>
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  Determina cada cuánto el sidecar verificará el estado de los clústeres.
+                </p>
+              </div>
+
+              {/* Log File Path */}
+              <div className="grid gap-2">
+                <Label className="flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-primary" />
+                  Ruta del Archivo de Log
+                </Label>
+                <Input
+                  value={logFilePath}
+                  onChange={(e) => setLogFilePath(e.target.value)}
+                  placeholder="/var/log/app.log"
+                  className="font-mono text-sm bg-muted/20"
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  Ruta absoluta donde el sidecar buscará los logs de la aplicación para este integrador.
+                </p>
+              </div>
+
+            </CardContent>
+          </Card>
+        </motion.div>
+
+        <div className="grid md:grid-cols-2 gap-8">
+          {/* 2. Source Clusters */}
+          <motion.div
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.2 }}
+            className="space-y-4"
+          >
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-semibold flex items-center gap-2">
+                <Activity className="w-5 h-5 text-blue-400" />
+                Origen (Sources)
+              </h2>
+              <Button variant="ghost" size="sm" onClick={addSourceCluster} className="text-primary hover:text-primary/80">
+                <Plus className="w-4 h-4 mr-1" /> Añadir Cluster
+              </Button>
+            </div>
+
+            {sourceClusters.map((cluster, i) => (
+              <Card key={i} className="border-border/50 bg-card/30 backdrop-blur-sm relative group hover:border-primary/30 transition-colors">
+                <CardContent className="p-4 space-y-4">
+                  {sourceClusters.length > 1 && (
+                    <button
+                      onClick={() => removeSourceCluster(i)}
+                      className="absolute top-2 right-2 p-1 text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+
+                  <div className="space-y-2">
+                    <Label className="text-xs font-mono text-muted-foreground">BOOTSTRAP SERVERS</Label>
+                    <div className="flex items-center gap-2">
+                      <Server className="w-4 h-4 text-muted-foreground" />
+                      <Input
+                        value={cluster.bootstrap_servers}
+                        onChange={(e) => handleSourceChange(i, 'bootstrap_servers', e.target.value)}
+                        placeholder="localhost:9092"
+                        className="font-mono text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-xs font-mono text-muted-foreground">TOPICS (Separados por coma)</Label>
+                    <Input
+                      value={cluster.topics.map(t => t.topic).join(', ')}
+                      onChange={(e) => handleTopicChange(i, e.target.value)}
+                      placeholder="TOPIC.A, TOPIC.B"
+                      className="font-mono text-sm"
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </motion.div>
+
+          {/* 3. Destination Cluster */}
+          <motion.div
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={{ delay: 0.3 }}
+            className="space-y-4"
+          >
+            <h2 className="text-xl font-semibold flex items-center gap-2">
+              <Zap className="w-5 h-5 text-yellow-400" />
+              Destino (Destination)
+            </h2>
+
+            <Card className="border-border/50 bg-card/30 backdrop-blur-sm border-l-4 border-l-yellow-400/50">
+              <CardContent className="p-4 space-y-4">
+                <div className="space-y-2">
+                  <Label className="text-xs font-mono text-muted-foreground">BOOTSTRAP SERVERS</Label>
+                  <div className="flex items-center gap-2">
+                    <Server className="w-4 h-4 text-muted-foreground" />
+                    <Input
+                      value={destinationCluster.bootstrap_servers}
+                      onChange={(e) => setDestinationCluster({ ...destinationCluster, bootstrap_servers: e.target.value })}
+                      placeholder="localhost:9092"
+                      className="font-mono text-sm"
+                    />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label className="text-xs font-mono text-muted-foreground">TOPIC DE SALIDA</Label>
+                  <div className="flex items-center gap-2">
+                    <ArrowRight className="w-4 h-4 text-muted-foreground" />
+                    <Input
+                      value={destinationCluster.topic}
+                      onChange={(e) => setDestinationCluster({ ...destinationCluster, topic: e.target.value })}
+                      placeholder="INTEGRATED.TOPIC"
+                      className="font-mono text-sm"
+                    />
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </motion.div>
+        </div>
       </div>
     </MainLayout>
   );

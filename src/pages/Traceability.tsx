@@ -7,7 +7,9 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { LogViewer } from "@/components/LogViewer";
-import { SIDECAR_WS, SIDECAR_API } from "@/lib/api";
+
+// SIDECAR imports removed
+import { useIntegrator } from "@/contexts/IntegratorContext";
 
 type StepStatus = "completed" | "error" | "pending";
 
@@ -41,6 +43,7 @@ const statusConfig = {
 };
 
 const Traceability = () => {
+  const { selectedIntegrator } = useIntegrator();
   const [searchId, setSearchId] = useState("");
   const [currentTrace, setCurrentTrace] = useState<{
     transactionId: string;
@@ -56,7 +59,9 @@ const Traceability = () => {
   const initialSearchTriggered = useRef(false);
 
   useEffect(() => {
-    const ws = new WebSocket(SIDECAR_WS);
+    if (!selectedIntegrator?.wsUrl) return;
+
+    const ws = new WebSocket(selectedIntegrator.wsUrl);
     wsRef.current = ws;
 
     ws.onmessage = (event) => {
@@ -71,7 +76,7 @@ const Traceability = () => {
     return () => {
       ws.close();
     };
-  }, []);
+  }, [selectedIntegrator?.wsUrl]);
 
   // Auto-search from URL param
   useEffect(() => {
@@ -81,122 +86,124 @@ const Traceability = () => {
       initialSearchTriggered.current = true;
 
       // Fetch logs from API instead of relying on WS history
-      fetch(`${SIDECAR_API}/logs/search?q=${idFromUrl}`)
-        .then(res => res.json())
-        .then(logs => {
-          if (logs.length > 0) {
-            let expectedTopics: string[] = [];
-            const receivedTopics: Set<string> = new Set();
-            const steps: TraceStep[] = [];
+      if (selectedIntegrator?.apiUrl) {
+        fetch(`${selectedIntegrator.apiUrl}/logs/search?q=${idFromUrl}`)
+          .then(res => res.json())
+          .then(logs => {
+            if (logs.length > 0) {
+              let expectedTopics: string[] = [];
+              const receivedTopics: Set<string> = new Set();
+              const steps: TraceStep[] = [];
 
-            // First pass: Identify expected topics and build initial steps
-            logs.forEach((log: any) => {
-              let stepName = "Evento Procesado";
-              let status: StepStatus = "completed";
-              let details = log.message;
-              let topic = undefined;
+              // First pass: Identify expected topics and build initial steps
+              logs.forEach((log: any) => {
+                let stepName = "Evento Procesado";
+                let status: StepStatus = "completed";
+                let details = log.message;
+                let topic = undefined;
 
-              if (log.message.includes("Plan dinámico registrado")) {
-                stepName = "Planificación de Integración";
-                // Extract expected topics from message
-                // Format seen: "{TP-TOPIC-1=1, TP-TOPIC-2=1}" (Java Map.toString())
-                try {
-                  // Try to extract content inside {}
-                  const mapContentMatch = log.message.match(/\{([^}]+)\}/);
-                  if (mapContentMatch) {
-                    const mapContent = mapContentMatch[1];
-                    // Split by comma and extract keys (Topic names)
-                    // Entry format: "TOPIC_NAME=1"
-                    expectedTopics = mapContent.split(",").map((entry: string) => {
-                      const parts = entry.trim().split("=");
-                      return parts[0].trim();
-                    });
-                  } else {
-                    // Fallback: try JSON if it was JSON
-                    const jsonPart = log.message.substring(log.message.indexOf("{"));
-                    const plan = JSON.parse(jsonPart);
-                    if (plan.topicosIntegrados) {
-                      expectedTopics = plan.topicosIntegrados.map((t: any) => t.nombre);
+                if (log.message.includes("Plan dinámico registrado")) {
+                  stepName = "Planificación de Integración";
+                  // Extract expected topics from message
+                  // Format seen: "{TP-TOPIC-1=1, TP-TOPIC-2=1}" (Java Map.toString())
+                  try {
+                    // Try to extract content inside {}
+                    const mapContentMatch = log.message.match(/\{([^}]+)\}/);
+                    if (mapContentMatch) {
+                      const mapContent = mapContentMatch[1];
+                      // Split by comma and extract keys (Topic names)
+                      // Entry format: "TOPIC_NAME=1"
+                      expectedTopics = mapContent.split(",").map((entry: string) => {
+                        const parts = entry.trim().split("=");
+                        return parts[0].trim();
+                      });
+                    } else {
+                      // Fallback: try JSON if it was JSON
+                      const jsonPart = log.message.substring(log.message.indexOf("{"));
+                      const plan = JSON.parse(jsonPart);
+                      if (plan.topicosIntegrados) {
+                        expectedTopics = plan.topicosIntegrados.map((t: any) => t.nombre);
+                      }
+                    }
+                  } catch (e) {
+                    console.warn("Failed to parse plan:", e);
+                    // Fallback regex if simple string [Topic1, Topic2]
+                    const match = log.message.match(/\[(.*?)\]/);
+                    if (match) {
+                      expectedTopics = match[1].split(",").map(t => t.trim());
                     }
                   }
-                } catch (e) {
-                  console.warn("Failed to parse plan:", e);
-                  // Fallback regex if simple string [Topic1, Topic2]
-                  const match = log.message.match(/\[(.*?)\]/);
+                } else if (log.message.includes("Evento recibido del tópico")) {
+                  // Just track received topics, don't show step
+                  const match = log.message.match(/tópico\s+([A-Za-z0-9._-]+)/);
                   if (match) {
-                    expectedTopics = match[1].split(",").map(t => t.trim());
+                    receivedTopics.add(match[1]);
                   }
+                  return; // Skip adding step
+                } else if (log.message.includes("READY")) {
+                  stepName = "Validación Completa";
+                } else if (log.message.includes("Integrated correlation")) {
+                  stepName = "Integración Exitosa";
+                } else if (log.level === "ERROR") {
+                  stepName = "Error en Procesamiento";
+                  status = "error";
                 }
-              } else if (log.message.includes("Evento recibido del tópico")) {
-                // Just track received topics, don't show step
-                const match = log.message.match(/tópico\s+([A-Za-z0-9._-]+)/);
-                if (match) {
-                  receivedTopics.add(match[1]);
+
+                steps.push({
+                  step: stepName,
+                  status: status,
+                  timestamp: log["@timestamp"],
+                  details: details,
+                  topic: topic
+                });
+              });
+
+              // Calculate missing topics
+              const missingTopics = expectedTopics.filter(t => !receivedTopics.has(t));
+
+              // Check if we have an error step
+              const errorStepIndex = steps.findIndex(s => s.status === "error");
+              let errorTimestamp = null;
+
+              if (errorStepIndex !== -1) {
+                errorTimestamp = steps[errorStepIndex].timestamp;
+                // If we have missing topics, remove the generic error step to replace it
+                if (missingTopics.length > 0) {
+                  steps.splice(errorStepIndex, 1);
                 }
-                return; // Skip adding step
-              } else if (log.message.includes("READY")) {
-                stepName = "Validación Completa";
-              } else if (log.message.includes("Integrated correlation")) {
-                stepName = "Integración Exitosa";
-              } else if (log.level === "ERROR") {
-                stepName = "Error en Procesamiento";
-                status = "error";
               }
 
-              steps.push({
-                step: stepName,
-                status: status,
-                timestamp: log["@timestamp"],
-                details: details,
-                topic: topic
-              });
-            });
-
-            // Calculate missing topics
-            const missingTopics = expectedTopics.filter(t => !receivedTopics.has(t));
-
-            // Check if we have an error step
-            const errorStepIndex = steps.findIndex(s => s.status === "error");
-            let errorTimestamp = null;
-
-            if (errorStepIndex !== -1) {
-              errorTimestamp = steps[errorStepIndex].timestamp;
-              // If we have missing topics, remove the generic error step to replace it
               if (missingTopics.length > 0) {
-                steps.splice(errorStepIndex, 1);
+                steps.push({
+                  step: "Eventos Faltantes",
+                  status: "error",
+                  timestamp: errorTimestamp, // Use timeout timestamp if available
+                  details: missingTopics.map(t => `• ${t}`).join('\n'),
+                  topic: undefined
+                });
               }
-            }
 
-            if (missingTopics.length > 0) {
-              steps.push({
-                step: "Eventos Faltantes",
-                status: "error",
-                timestamp: errorTimestamp, // Use timeout timestamp if available
-                details: missingTopics.map(t => `• ${t}`).join('\n'),
-                topic: undefined
+              // Sort steps: existing ones by timestamp, missing ones at the end
+              steps.sort((a, b) => {
+                if (!a.timestamp) return 1;
+                if (!b.timestamp) return -1;
+                return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
               });
+
+              setCurrentTrace({
+                transactionId: idFromUrl,
+                steps: steps
+              });
+              setNotFound(false);
+            } else {
+              setNotFound(true);
             }
-
-            // Sort steps: existing ones by timestamp, missing ones at the end
-            steps.sort((a, b) => {
-              if (!a.timestamp) return 1;
-              if (!b.timestamp) return -1;
-              return new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
-            });
-
-            setCurrentTrace({
-              transactionId: idFromUrl,
-              steps: steps
-            });
-            setNotFound(false);
-          } else {
+          })
+          .catch(err => {
+            console.error("Error searching logs:", err);
             setNotFound(true);
-          }
-        })
-        .catch(err => {
-          console.error("Error searching logs:", err);
-          setNotFound(true);
-        });
+          });
+      }
     }
   }, [searchParams]);
 

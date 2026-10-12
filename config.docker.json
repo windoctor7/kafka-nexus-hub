@@ -1,0 +1,76 @@
+{
+    "source_clusters": [
+        {
+            "bootstrap_servers": "broker-source-1:29092",
+            "topics": [
+                {
+                    "topic": "TP-CREDITO-COBRANZA-INVESTIGACION-PRESTAMO-V1-ABONO-ADD",
+                    "correlation_key": "operacion.detalleStaging.uuidTrazabilidad"
+                },
+                {
+                    "topic": "TP-CC-LOAN-GLOBAL-BALANCES-ADDITIONAL-INFORMATION-V1-LOAN-ADD",
+                    "correlation_key": "operation.eventDetail.uuidTracking"
+                }
+            ],
+            "glueRegistryName": "",
+            "glueSchemaName": "",
+            "schemaRegistryUrl": "http://schema-registry:8081",
+            "avroSchemasProvider": "NONE",
+            "authType": "NONE",
+            "credentialId": ""
+        },
+        {
+            "bootstrap_servers": "broker-source-2:29092",
+            "topics": [
+                {
+                    "topic": "TP-SISTEMAS-CAJA-CENTRALIZACION-CAJA-V1-CREDITO-ADD",
+                    "correlation_key": "operacion.idTrazabilidad"
+                }
+            ],
+            "glueRegistryName": "",
+            "glueSchemaName": "",
+            "schemaRegistryUrl": "http://schema-registry:8081",
+            "avroSchemasProvider": "NONE",
+            "authType": "NONE",
+            "credentialId": ""
+        }
+    ],
+    "destination_cluster": {
+        "bootstrap_servers": "broker-dest:29092",
+        "schemaRegistryUrl": "http://schema-registry:8081",
+        "topic": "TP-CC-DESTINO-V1-MESSAGES-INTEGRATED-ADD",
+        "glueRegistryName": "",
+        "glueSchemaName": "",
+        "avroSchemasProvider": "NONE",
+        "authType": "NONE",
+        "credentialId": ""
+    },
+    "window_seconds": 20,
+    "orchestratorTopic": "TP-CREDITO-COBRANZA-INVESTIGACION-PRESTAMO-V1-ABONO-ADD",
+    "integration_rules": {
+        "lang": "es",
+        "fields": [
+            {
+                "name": "operation",
+                "type": "object",
+                "fields": [
+                    {
+                        "source": "TP-CREDITO-COBRANZA-INVESTIGACION-PRESTAMO-V1-ABONO-ADD",
+                        "name": "abonoAddOperation",
+                        "field": "operacion"
+                    },
+                    {
+                        "source": "TP-SISTEMAS-CAJA-CENTRALIZACION-CAJA-V1-CREDITO-ADD",
+                        "name": "creditoAddOperation",
+                        "field": "operacion"
+                    },
+                    {
+                        "source": "TP-CC-LOAN-GLOBAL-BALANCES-ADDITIONAL-INFORMATION-V1-LOAN-ADD",
+                        "name": "additionalInformationAddOperation",
+                        "field": "operation"
+                    }
+                ]
+            }
+        ]
+    }
+}

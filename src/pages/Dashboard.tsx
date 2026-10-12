@@ -9,7 +9,8 @@ import { useWebSocket } from "@/hooks/useWebSocket";
 import { useEffect, useState, useRef } from "react";
 import { toast } from "sonner";
 import { useIntegrator } from "@/contexts/IntegratorContext";
-import { SIDECAR_API } from "@/lib/api";
+// SIDECAR_API removed
+
 
 interface DashboardData {
   sourceClusters: any[];
@@ -40,8 +41,11 @@ const Dashboard = () => {
   const WS_URL = selectedIntegrator?.wsUrl || import.meta.env.VITE_WS_URL || "ws://localhost:3001/logs";
 
   const fetchDashboardData = async () => {
+    if (!selectedIntegrator?.apiUrl) return;
+
     try {
-      const res = await fetch(`${SIDECAR_API}/dashboard`);
+      // Use dynamic API URL
+      const res = await fetch(`${selectedIntegrator.apiUrl}/dashboard`);
       if (!res.ok) throw new Error("Failed to fetch dashboard data");
       const json = await res.json();
       console.log("Dashboard Data Received:", json); // Debug
@@ -223,27 +227,27 @@ const Dashboard = () => {
                   variant={data.dashboardStats.errorsToday > 0 ? "error" : "default"}
                 />
 
-                {/* Latency Card (P95) */}
+                {/* Latency Card (Promedio) */}
                 <div className="rounded-xl border bg-card text-card-foreground shadow-sm p-6 flex flex-col justify-between relative overflow-hidden">
                   <div className="absolute top-0 right-0 p-4 opacity-5">
                     <Zap className="h-24 w-24" />
                   </div>
                   <div className="flex items-center justify-between z-10">
-                    <h3 className="text-sm font-medium text-muted-foreground">Latencia (P95)</h3>
+                    <h3 className="text-sm font-medium text-muted-foreground">Latencia (Promedio)</h3>
                     <div className="p-2 bg-primary/10 rounded-full">
                       <Zap className="h-4 w-4 text-primary" />
                     </div>
                   </div>
                   <div className="space-y-1 z-10 mt-2">
                     <div className="flex items-baseline gap-2">
-                      <span className="text-2xl font-bold">{data.dashboardStats.latency?.p95 || 0}ms</span>
-                      <span className="text-xs text-muted-foreground">95% de las tx</span>
+                      <span className="text-2xl font-bold">{data.dashboardStats.latency?.avg || 0}ms</span>
+                      <span className="text-xs text-muted-foreground">Tiempo Promedio</span>
                     </div>
                     {/* Visual Health Indicator */}
                     <div className="h-1.5 w-full bg-secondary rounded-full overflow-hidden mt-2">
                       <div
-                        className={`h-full transition-all duration-500 ${(data.dashboardStats.latency?.p95 || 0) > 1000 ? 'bg-destructive' :
-                          (data.dashboardStats.latency?.p95 || 0) > 500 ? 'bg-yellow-500' : 'bg-green-500'
+                        className={`h-full transition-all duration-500 ${(data.dashboardStats.latency?.avg || 0) > 1000 ? 'bg-destructive' :
+                          (data.dashboardStats.latency?.avg || 0) > 500 ? 'bg-yellow-500' : 'bg-green-500'
                           }`}
                         style={{ width: '100%' }}
                       />
@@ -251,8 +255,8 @@ const Dashboard = () => {
                   </div>
                   <div className="flex items-center gap-4 text-xs text-muted-foreground pt-4 mt-auto z-10">
                     <div className="flex items-center gap-1">
-                      <span className="font-medium text-foreground">Avg:</span>
-                      {data.dashboardStats.latency?.avg || 0}ms
+                      <span className="font-medium text-foreground">P95:</span>
+                      {data.dashboardStats.latency?.p95 || 0}ms
                     </div>
                     <div className="flex items-center gap-1">
                       <span className="font-medium text-foreground">Max:</span>

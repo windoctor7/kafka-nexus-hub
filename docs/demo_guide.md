@@ -40,7 +40,7 @@ Genera tráfico transaccional normal para ver cómo el dashboard cobra vida.
 ```bash
 # En la carpeta del microservicio Java
 # 1 minuto de duración, 0% de errores
-./k6 run -e TEST_DURATION=1m -e ERROR_RATE=0 tests/k6/load_test.js
+./k6 run -e TEST_DURATION=1m -e RAMP_DURATION=10s -e ERROR_RATE=0 tests/k6/load_test.js
 ```
 *Qué mostrar en pantalla:*
 *   Ver cómo sube el contador de "Transacciones Exitosas".
@@ -53,7 +53,7 @@ Demuestra la capacidad de observabilidad ante fallos.
 **Comando (Terminal K6):**
 ```bash
 # 2 minutos, 5% de errores simulados
-./k6 run -e TEST_DURATION=2m -e ERROR_RATE=0.05 tests/k6/load_test.js
+./k6 run -e TEST_DURATION=2m -e RAMP_DURATION=10s -e ERROR_RATE=0.05 tests/k6/load_test.js
 ```
 *Qué mostrar en pantalla:*
 *   Señalar cómo aparece la tarjeta roja de "Transacciones Incompletas".

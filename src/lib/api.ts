@@ -1,5 +1,5 @@
-export const SIDECAR_API = 'http://localhost:3001/api';
-export const SIDECAR_WS = 'ws://localhost:3001/logs';
+// Remove hardcoded SIDECAR_API
+export const SIDECAR_WS_DEFAULT = 'ws://localhost:3001/logs';
 
 export interface ClusterConfig {
     bootstrap_servers: string;
@@ -20,16 +20,16 @@ export interface IntegrationConfig {
     integration_rules: any;
 }
 
-export const fetchConfig = async (): Promise<IntegrationConfig> => {
-    const response = await fetch(`${SIDECAR_API}/config`);
+export const fetchConfig = async (baseUrl: string): Promise<IntegrationConfig> => {
+    const response = await fetch(`${baseUrl}/config`);
     if (!response.ok) {
         throw new Error('Failed to fetch config');
     }
     return response.json();
 };
 
-export const updateConfig = async (config: IntegrationConfig): Promise<void> => {
-    const response = await fetch(`${SIDECAR_API}/config`, {
+export const updateConfig = async (baseUrl: string, config: IntegrationConfig): Promise<void> => {
+    const response = await fetch(`${baseUrl}/config`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',

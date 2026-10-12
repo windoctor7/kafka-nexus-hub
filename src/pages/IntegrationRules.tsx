@@ -3,6 +3,7 @@ import { MainLayout } from "@/components/layout/MainLayout";
 import { motion } from "framer-motion";
 import { sourceFields as mockSourceFields, destinationFields } from "@/data/mockData";
 import { fetchConfig, updateConfig, IntegrationConfig } from "@/lib/api";
+import { useIntegrator } from "@/contexts/IntegratorContext";
 import { Code2, Eye, Workflow, Save, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import Editor from "@monaco-editor/react";
@@ -14,6 +15,7 @@ import { toast } from "sonner";
 type ViewMode = "visual" | "flow" | "code";
 
 const IntegrationRules = () => {
+  const { selectedIntegrator } = useIntegrator();
   const [viewMode, setViewMode] = useState<ViewMode>("flow");
   const [showUploader, setShowUploader] = useState(false);
   const [loadedApis, setLoadedApis] = useState<ParsedAsyncApi[]>([]);
@@ -21,12 +23,15 @@ const IntegrationRules = () => {
   const [mappings, setMappings] = useState<{ source: string; field: string; target: string }[]>([]);
 
   useEffect(() => {
-    loadConfig();
-  }, []);
+    if (selectedIntegrator?.apiUrl) {
+      loadConfig();
+    }
+  }, [selectedIntegrator]);
 
   const loadConfig = async () => {
+    if (!selectedIntegrator?.apiUrl) return;
     try {
-      const data = await fetchConfig();
+      const data = await fetchConfig(selectedIntegrator.apiUrl);
       setConfig(data);
       if (data.integration_rules && data.integration_rules.fields) {
         const flatMappings: { source: string; field: string; target: string }[] = [];
@@ -110,7 +115,7 @@ const IntegrationRules = () => {
       };
 
       const newConfig = { ...config, integration_rules: newRules };
-      await updateConfig(newConfig);
+      await updateConfig(selectedIntegrator.apiUrl, newConfig);
 
       toast.success("Reglas guardadas exitosamente", {
         description: `${mappings.length} mapeos configurados`,

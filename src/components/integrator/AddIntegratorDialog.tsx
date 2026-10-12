@@ -1,90 +1,123 @@
-import { useState } from 'react';
-import { Plus, Server } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
-import { useIntegrator } from '@/contexts/IntegratorContext';
-import { toast } from 'sonner';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Plus, Loader2, Server, Save } from 'lucide-react';
+import { useIntegrator, Integrator } from '@/contexts/IntegratorContext';
+import { toast } from "sonner";
 
-const AddIntegratorDialog = () => {
-  const { addIntegrator } = useIntegrator();
-  const [open, setOpen] = useState(false);
+interface IntegratorDialogProps {
+  initialData?: Integrator;
+  trigger?: React.ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}
+
+const AddIntegratorDialog = ({ initialData, trigger, open: controlledOpen, onOpenChange: setControlledOpen }: IntegratorDialogProps = {}) => {
+  const { addIntegrator, updateIntegrator } = useIntegrator();
+  const [internalOpen, setInternalOpen] = useState(false);
+
+  const isOpen = controlledOpen !== undefined ? controlledOpen : internalOpen;
+  const setOpen = setControlledOpen || setInternalOpen;
+
+  const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     description: '',
-    wsUrl: '',
-    status: 'offline' as 'online' | 'offline' | 'warning',
+    wsUrl: 'ws://localhost:3001/logs',
+    apiUrl: 'http://localhost:3001/api',
+    status: 'online' as 'online' | 'offline' | 'warning',
   });
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!formData.name.trim() || !formData.wsUrl.trim()) {
-      toast.error('Por favor completa los campos requeridos');
-      return;
+  useEffect(() => {
+    if (initialData) {
+      setFormData({
+        name: initialData.name,
+        description: initialData.description,
+        wsUrl: initialData.wsUrl,
+        apiUrl: initialData.apiUrl,
+        status: initialData.status
+      });
+    } else {
+      // Reset defaults when opening in Add mode
+      if (isOpen) {
+        setFormData({
+          name: '',
+          description: '',
+          wsUrl: 'ws://localhost:3001/logs',
+          apiUrl: 'http://localhost:3001/api',
+          status: 'online',
+        });
+      }
     }
+  }, [initialData, isOpen]);
 
-    const newIntegrator = {
-      id: `integrator-${Date.now()}`,
-      name: formData.name.trim(),
-      description: formData.description.trim(),
-      wsUrl: formData.wsUrl.trim(),
-      status: formData.status,
-      lastActivity: new Date().toISOString(),
-    };
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
 
-    addIntegrator(newIntegrator);
-    toast.success(`Integrador "${newIntegrator.name}" agregado correctamente`);
-    
-    setFormData({
-      name: '',
-      description: '',
-      wsUrl: '',
-      status: 'offline',
-    });
-    setOpen(false);
+    try {
+      const integratorData = {
+        ...formData,
+        id: initialData?.id || crypto.randomUUID(),
+        lastActivity: initialData?.lastActivity || new Date().toISOString(),
+      };
+
+      if (initialData) {
+        await updateIntegrator(integratorData);
+        toast.success("Integrador actualizado");
+      } else {
+        await addIntegrator(integratorData);
+        toast.success("Integrador agregado exitosamente");
+      }
+
+      setOpen(false);
+
+      if (!initialData) {
+        setFormData({
+          name: '',
+          description: '',
+          wsUrl: 'ws://localhost:3001/logs',
+          apiUrl: 'http://localhost:3001/api',
+          status: 'online',
+        });
+      }
+    } catch (error) {
+      console.error(error);
+      toast.error("Error al guardar integrador");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={isOpen} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="gap-2">
-          <Plus className="w-4 h-4" />
-          Agregar Integrador
-        </Button>
+        {trigger || (
+          <Button className="gap-2 bg-primary hover:bg-primary/90 text-primary-foreground shadow-lg shadow-primary/20">
+            <Plus className="w-4 h-4" />
+            Nuevo Integrador
+          </Button>
+        )}
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[500px] bg-card border-border">
+      <DialogContent className="sm:max-w-[500px] border-border/50 bg-background/95 backdrop-blur-xl">
         <DialogHeader>
           <div className="flex items-center gap-3">
             <div className="p-2 rounded-lg bg-primary/20">
               <Server className="w-5 h-5 text-primary" />
             </div>
             <div>
-              <DialogTitle>Nuevo Integrador</DialogTitle>
+              <DialogTitle>{initialData ? 'Editar Integrador' : 'Agregar Nuevo Integrador'}</DialogTitle>
               <DialogDescription>
-                Configura un nuevo componente integrador para monitorear
+                {initialData ? 'Modifica los datos de conexión del componente.' : 'Configura los datos de conexión para un nuevo componente integrador.'}
               </DialogDescription>
             </div>
           </div>
         </DialogHeader>
-        
+
         <form onSubmit={handleSubmit} className="space-y-4 mt-4">
           <div className="space-y-2">
             <Label htmlFor="name">Nombre *</Label>
@@ -94,6 +127,7 @@ const AddIntegratorDialog = () => {
               value={formData.name}
               onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
               className="bg-background/50"
+              required
             />
           </div>
 
@@ -109,22 +143,36 @@ const AddIntegratorDialog = () => {
             />
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="wsUrl">WebSocket URL *</Label>
-            <Input
-              id="wsUrl"
-              placeholder="ws://localhost:8080/ws"
-              value={formData.wsUrl}
-              onChange={(e) => setFormData(prev => ({ ...prev, wsUrl: e.target.value }))}
-              className="bg-background/50 font-mono text-sm"
-            />
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="apiUrl">API URL *</Label>
+              <Input
+                id="apiUrl"
+                placeholder="http://localhost:3001/api"
+                value={formData.apiUrl}
+                onChange={(e) => setFormData(prev => ({ ...prev, apiUrl: e.target.value }))}
+                className="bg-background/50 font-mono text-sm"
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="wsUrl">WebSocket URL *</Label>
+              <Input
+                id="wsUrl"
+                placeholder="ws://localhost:3001/logs"
+                value={formData.wsUrl}
+                onChange={(e) => setFormData(prev => ({ ...prev, wsUrl: e.target.value }))}
+                className="bg-background/50 font-mono text-sm"
+                required
+              />
+            </div>
           </div>
 
           <div className="space-y-2">
             <Label htmlFor="status">Estado Inicial</Label>
             <Select
               value={formData.status}
-              onValueChange={(value: 'online' | 'offline' | 'warning') => 
+              onValueChange={(value: 'online' | 'offline' | 'warning') =>
                 setFormData(prev => ({ ...prev, status: value }))
               }
             >
@@ -143,9 +191,17 @@ const AddIntegratorDialog = () => {
             <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
               Cancelar
             </Button>
-            <Button type="submit" className="gap-2">
-              <Plus className="w-4 h-4" />
-              Agregar
+            <Button type="submit" disabled={isLoading} className="gap-2">
+              {isLoading && <Loader2 className="w-4 h-4 animate-spin" />}
+              {initialData ? (
+                <>
+                  <Save className="w-4 h-4" /> Guardar Cambios
+                </>
+              ) : (
+                <>
+                  <Plus className="w-4 h-4" /> Agregar
+                </>
+              )}
             </Button>
           </DialogFooter>
         </form>

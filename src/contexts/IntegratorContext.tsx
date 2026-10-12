@@ -6,7 +6,9 @@ export interface Integrator {
   description: string;
   status: 'online' | 'offline' | 'warning';
   wsUrl: string;
+  apiUrl: string;
   lastActivity?: string;
+  configuration?: any;
 }
 
 interface IntegratorContextType {
@@ -14,51 +16,114 @@ interface IntegratorContextType {
   setSelectedIntegrator: (integrator: Integrator | null) => void;
   integrators: Integrator[];
   addIntegrator: (integrator: Integrator) => void;
+  updateIntegrator: (integrator: Integrator) => void;
   removeIntegrator: (id: string) => void;
 }
 
 const IntegratorContext = createContext<IntegratorContextType | undefined>(undefined);
 
-// Mock integrators for demo
+// Default integrators for demo/initial load
 const defaultIntegrators: Integrator[] = [
   {
     id: 'integrator-1',
-    name: 'Payments Integrator',
-    description: 'Procesa transacciones de pagos desde múltiples fuentes',
+    name: 'Local Dev Integrator',
+    description: 'Integrador corriendo localmente en Docker',
     status: 'online',
     wsUrl: 'ws://localhost:3001/logs',
-    lastActivity: '2024-01-15T10:30:00Z',
-  },
-  {
-    id: 'integrator-2',
-    name: 'Orders Integrator',
-    description: 'Integra órdenes de e-commerce y retail',
-    status: 'warning',
-    wsUrl: 'ws://localhost:8081/ws',
-    lastActivity: '2024-01-15T09:45:00Z',
-  },
-  {
-    id: 'integrator-3',
-    name: 'Inventory Integrator',
-    description: 'Sincroniza inventario entre sistemas',
-    status: 'offline',
-    wsUrl: 'ws://localhost:8082/ws',
-    lastActivity: '2024-01-14T18:00:00Z',
-  },
+    apiUrl: 'http://localhost:3001/api',
+    lastActivity: new Date().toISOString(),
+  }
 ];
 
 export const IntegratorProvider = ({ children }: { children: ReactNode }) => {
-  const [selectedIntegrator, setSelectedIntegrator] = useState<Integrator | null>(null);
-  const [integrators, setIntegrators] = useState<Integrator[]>(defaultIntegrators);
+  const REGISTRY_API = "http://localhost:3001/api";
+  const [integrators, setIntegrators] = useState<Integrator[]>([]);
 
-  const addIntegrator = (integrator: Integrator) => {
-    setIntegrators(prev => [...prev, integrator]);
+  // Load selected ID from local storage (preference)
+  const [selectedIntegratorId, setSelectedIntegratorId] = useState<string | null>(() => {
+    return localStorage.getItem('kafka-selected-integrator-id');
+  });
+
+  const selectedIntegrator = integrators.find(i => i.id === selectedIntegratorId) || null;
+
+  const fetchIntegrators = async () => {
+    try {
+      const res = await fetch(`${REGISTRY_API}/integrators`);
+      if (res.ok) {
+        const data = await res.json();
+        setIntegrators(data);
+      }
+    } catch (err) {
+      console.error("Failed to fetch integrators registry:", err);
+    }
   };
 
-  const removeIntegrator = (id: string) => {
-    setIntegrators(prev => prev.filter(i => i.id !== id));
-    if (selectedIntegrator?.id === id) {
-      setSelectedIntegrator(null);
+  // Initial Load
+  React.useEffect(() => {
+    fetchIntegrators();
+  }, []);
+
+  // Sync selection preference
+  React.useEffect(() => {
+    if (selectedIntegratorId) {
+      localStorage.setItem('kafka-selected-integrator-id', selectedIntegratorId);
+    } else {
+      localStorage.removeItem('kafka-selected-integrator-id');
+    }
+  }, [selectedIntegratorId]);
+
+  const setSelectedIntegrator = (integrator: Integrator | null) => {
+    setSelectedIntegratorId(integrator ? integrator.id : null);
+  };
+
+  const addIntegrator = async (integrator: Integrator) => {
+    try {
+      const res = await fetch(`${REGISTRY_API}/integrators`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(integrator)
+      });
+      if (res.ok) {
+        await fetchIntegrators(); // Refresh list
+      } else {
+        console.error("Failed to add integrator");
+      }
+    } catch (err) {
+      console.error("Error adding integrator:", err);
+    }
+  };
+
+  const updateIntegrator = async (integrator: Integrator) => {
+    try {
+      const res = await fetch(`${REGISTRY_API}/integrators/${integrator.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(integrator)
+      });
+      if (res.ok) {
+        await fetchIntegrators();
+        if (selectedIntegratorId === integrator.id) {
+          // Force refresh if current selection updated
+        }
+      }
+    } catch (err) {
+      console.error("Error updating integrator:", err);
+    }
+  };
+
+  const removeIntegrator = async (id: string) => {
+    try {
+      const res = await fetch(`${REGISTRY_API}/integrators/${id}`, {
+        method: 'DELETE'
+      });
+      if (res.ok) {
+        setIntegrators(prev => prev.filter(i => i.id !== id));
+        if (selectedIntegratorId === id) {
+          setSelectedIntegratorId(null);
+        }
+      }
+    } catch (err) {
+      console.error("Error removing integrator:", err);
     }
   };
 
@@ -68,6 +133,7 @@ export const IntegratorProvider = ({ children }: { children: ReactNode }) => {
       setSelectedIntegrator,
       integrators,
       addIntegrator,
+      updateIntegrator,
       removeIntegrator,
     }}>
       {children}

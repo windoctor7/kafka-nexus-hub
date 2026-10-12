@@ -2,7 +2,7 @@ import { MainLayout } from "@/components/layout/MainLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Activity, Server, Database, Cpu, Hash, ArrowDown, Zap, Layers } from "lucide-react";
 import { useEffect, useState, useRef, forwardRef, useLayoutEffect } from "react";
-import { SIDECAR_API } from "@/lib/api";
+import { fetchConfig } from "@/lib/api";
 import { motion } from "framer-motion";
 
 interface ClusterMetadata {
@@ -328,7 +328,10 @@ const TopologyOverlay = ({
   );
 };
 
+import { useIntegrator } from "@/contexts/IntegratorContext";
+
 const Clusters = () => {
+  const { selectedIntegrator } = useIntegrator();
   const [sourceClusters, setSourceClusters] = useState<ClusterConfig[]>([]);
   const [destinationCluster, setDestinationCluster] = useState<ClusterConfig | null>(null);
 
@@ -363,10 +366,12 @@ const Clusters = () => {
   };
 
   const fetchClusters = async () => {
+    if (!selectedIntegrator?.apiUrl) return;
+
     try {
-      const configRes = await fetch(`${SIDECAR_API}/config`);
+      const configRes = await fetch(`${selectedIntegrator.apiUrl}/config`);
       const config = await configRes.json();
-      const healthRes = await fetch(`${SIDECAR_API}/health/check`);
+      const healthRes = await fetch(`${selectedIntegrator.apiUrl}/health/check`);
       const healthData = await healthRes.json();
 
       const mappedSource = config.source_clusters.map((c: any, i: number) => ({
@@ -450,7 +455,7 @@ const Clusters = () => {
 
   return (
     <MainLayout>
-      <div className="relative max-w-7xl mx-auto py-12 px-4 flex flex-col justify-evenly min-h-[85vh]">
+      <div className="relative max-w-7xl mx-auto py-12 px-4 flex flex-col gap-16 md:gap-24 min-h-screen">
 
         {/* Topology Overlay */}
         <TopologyOverlay
@@ -462,7 +467,7 @@ const Clusters = () => {
         />
 
         {/* 1. Source Clusters Layer */}
-        <div className="relative z-10 grid grid-cols-1 md:grid-cols-3 gap-8">
+        <div className="relative z-10 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 lg:gap-12">
           {sourceClusters.map((cluster, i) => (
             <ClusterCard
               key={cluster.bootstrapServers}
